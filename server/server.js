@@ -38,7 +38,7 @@ function start(opts = {}) {
   const httpServer = http.createServer((req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     if (req.url.startsWith('/info')) { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(info())); return; }
-    res.end('Meccha Chameleon server');
+    res.end('peperhide server');
   });
   const wss = new WebSocketServer({ server: httpServer, maxPayload: 2 * 1024 * 1024 });
 

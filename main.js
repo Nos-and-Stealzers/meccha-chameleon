@@ -11,7 +11,13 @@ app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
 
 /* `--servers` opens the Server Manager instead of the game: it runs every server in servers.json from one window. */
 const MANAGER = process.argv.includes('--servers');
-if (MANAGER) app.setPath('userData', path.join(app.getPath('appData'), 'Meccha Chameleon Servers'));
+// Keep existing profiles and server settings through the rename. Never reset player progress.
+const profileOverride = app.commandLine.getSwitchValue('user-data-dir');
+app.setPath('userData', profileOverride || path.join(app.getPath('appData'), MANAGER ? 'Meccha Chameleon Servers' : 'Meccha Chameleon'));
+app.setName('peperhide');
+const firstInstance = app.requestSingleInstanceLock();
+if (!firstInstance) app.quit();
+app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } });
 
 let win = null, hosted = null, listener = null;
 const prefs = { contextIsolation: true, backgroundThrottling: false, preload: path.join(__dirname, 'preload.js') };
@@ -19,7 +25,7 @@ const prefs = { contextIsolation: true, backgroundThrottling: false, preload: pa
 function createWindow() {
   win = new BrowserWindow({
     width: 1600, height: 900, minWidth: 1024, minHeight: 640,
-    title: 'Meccha Chameleon', backgroundColor: '#11151f',
+    title: 'peperhide', backgroundColor: '#11151f',
     icon: path.join(__dirname, 'icon.png'), autoHideMenuBar: true, webPreferences: prefs,
   });
   Menu.setApplicationMenu(null);
@@ -53,8 +59,8 @@ const CFG_FILE = () => path.join(app.getPath('userData'), 'servers.json');
 const DEFAULT_CFG = {
   autoStart: true,
   servers: [
-    { name: 'Meccha Server 1', port: 7777, max: 15, password: '', enabled: true },
-    { name: 'Meccha Server 2', port: 7778, max: 15, password: '', enabled: true },
+    { name: 'peperhide Server 1', port: 7781, max: 15, password: '', enabled: true },
+    { name: 'peperhide Server 2', port: 7782, max: 15, password: '', enabled: true },
   ],
 };
 let cfg = null;
@@ -68,7 +74,7 @@ function saveCfg() { fs.mkdirSync(path.dirname(CFG_FILE()), { recursive: true })
 function validate(list) {
   const ports = new Set();
   for (const [i, s] of list.entries()) {
-    s.port = Math.round(+s.port); s.max = Math.max(2, Math.min(24, Math.round(+s.max) || 15)); s.name = String(s.name || `Meccha Server ${i + 1}`).slice(0, 40);
+    s.port = Math.round(+s.port); s.max = Math.max(2, Math.min(24, Math.round(+s.max) || 15)); s.name = String(s.name || `peperhide Server ${i + 1}`).slice(0, 40);
     if (!(s.port >= 1024 && s.port <= 65535)) return `Server ${i + 1}: port must be 1024-65535.`;
     if (ports.has(s.port)) return `Two servers use port ${s.port}. Every server needs its own port.`;
     ports.add(s.port);
@@ -117,7 +123,7 @@ ipcMain.handle('mgr:openConfig', () => { require('electron').shell.showItemInFol
 function createManager() {
   loadCfg();
   win = new BrowserWindow({
-    width: 980, height: 680, minWidth: 820, minHeight: 520, title: 'Meccha Server Manager', backgroundColor: '#0b0e15',
+    width: 980, height: 680, minWidth: 820, minHeight: 520, title: 'peperhide Server Manager', backgroundColor: '#0b0e15',
     icon: path.join(__dirname, 'icon.png'), autoHideMenuBar: true, webPreferences: prefs,
   });
   Menu.setApplicationMenu(null);
@@ -131,5 +137,5 @@ function createManager() {
   if (cfg.autoStart) (async () => { for (let i = 0; i < cfg.servers.length; i++) if (cfg.servers[i].enabled !== false) await startOne(i); })();
 }
 
-app.whenReady().then(MANAGER ? createManager : createWindow);
+if (firstInstance) app.whenReady().then(MANAGER ? createManager : createWindow);
 app.on('window-all-closed', () => { stopAll(); if (hosted) hosted.stop(); if (listener) listener.close(); app.quit(); });
