@@ -1,11 +1,11 @@
 {
   "name": "meccha-chameleon",
-  "version": "4.0.0",
+  "version": "4.0.1",
   "description": "Meccha Chameleon fan remake: paint-yourself hide and seek",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "package": "electron-packager . \"Meccha Chameleon\" --platform=win32 --arch=x64 --icon=icon.ico --out=dist --overwrite --asar --ignore=\"^/(assets|tools|dist)($|/)\" --ignore=\"\\.git\" --app-version=4.0.0 --win32metadata.ProductName=\"Meccha Chameleon\" --win32metadata.CompanyName=\"Nos and Stealzers\""
+    "package": "electron-packager . \"Meccha Chameleon\" --platform=win32 --arch=x64 --icon=icon.ico --out=dist --overwrite --asar --ignore=\"^/(assets|tools|dist)($|/)\" --ignore=\"\\.git\" --app-version=4.0.1 --win32metadata.ProductName=\"Meccha Chameleon\" --win32metadata.CompanyName=\"Nos and Stealzers\""
   },
   "devDependencies": {
     "@electron/packager": "^18.4.4",
