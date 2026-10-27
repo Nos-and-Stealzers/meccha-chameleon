@@ -10,7 +10,7 @@ const os = require('os');
 const { WebSocketServer } = require('ws');
 
 const BEACON_PORT = 47777;
-const VERSION = 2;
+const VERSION = 3;
 
 function lanIPs() {
   const out = [];

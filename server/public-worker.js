@@ -1,6 +1,6 @@
 /* Meccha Chameleon public servers: Cloudflare Worker + one Durable Object per room.
    Same wire protocol as server/server.js (hello/welcome/join/leave/relay/to/chat/profile/lobby/host). */
-const VERSION = 2;
+const VERSION = 3;
 const MAX = 15;
 const ROOMS = [
   { id: 'pub-1', name: 'Public 1' },
