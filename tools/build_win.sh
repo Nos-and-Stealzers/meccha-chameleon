@@ -13,5 +13,9 @@ V=$(node -p "require('./package.json').version")
 ./node_modules/rcedit/bin/rcedit-x64.exe "$OUT/Meccha Chameleon.exe" --set-icon icon.ico --set-version-string ProductName "Meccha Chameleon" --set-version-string FileDescription "Meccha Chameleon" --set-version-string CompanyName "Nos and Stealzers" --set-version-string OriginalFilename "Meccha Chameleon.exe" --set-file-version "$V" --set-product-version "$V"
 printf '@echo off\r\nstart "" "%%~dp0Meccha Chameleon.exe" --servers\r\n' > "$OUT/Meccha Servers.cmd"
 printf 'Meccha Chameleon %s\r\n\r\nPlay: run "Meccha Chameleon.exe".\r\nRun dedicated servers: run "Meccha Servers.cmd" (starts 2 servers on ports 7777 and 7778; edit them in the Server Manager).\r\nPublic servers (15 players each) need nothing: Play > Quick match.\r\nLAN friends see your servers automatically in the Servers tab.\r\n\r\n3D props and sound effects by Kenney (kenney.nl, CC0).\r\n' "$V" > "$OUT/README.txt"
-(cd dist && powershell -NoProfile -Command "Compress-Archive -Path MecchaChameleon -DestinationPath MecchaChameleon-Windows.zip -CompressionLevel Optimal -Force")
+# Python zipfile, not Compress-Archive: PowerShell writes backslash member names that some extractors flatten.
+(cd dist && python -c "import zipfile,os
+with zipfile.ZipFile('MecchaChameleon-Windows.zip','w',zipfile.ZIP_DEFLATED,compresslevel=9) as z:
+  for r,_,fs in os.walk('MecchaChameleon'):
+    for f in fs: p=os.path.join(r,f); z.write(p,p.replace(os.sep,'/'))")
 ls -la dist
