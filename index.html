@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Meccha Chameleon (fan remake)</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app"></div>
+
+<div id="hud" class="hidden">
+  <div id="topbar">
+    <div id="phase">Hide!</div>
+    <div id="timer">1:00</div>
+    <div id="sub"></div>
+  </div>
+  <div id="status"></div>
+  <div id="eyes" class="hidden">
+    <div class="eyes-label"><span>Hunter attention</span><b id="eyesTxt">calm</b></div>
+    <div class="bar"><i id="eyesBar"></i></div>
+  </div>
+  <div id="crosshair" class="hidden"></div>
+  <div id="toasts"></div>
+  <div id="hint"></div>
+
+  <div id="posebar">
+    <button data-pose="stand"><kbd>1</kbd>Stand</button>
+    <button data-pose="crouch"><kbd>2</kbd>Crouch</button>
+    <button data-pose="curl"><kbd>3</kbd>Curl</button>
+    <button data-pose="lie"><kbd>4</kbd>Lie</button>
+    <button data-pose="flat"><kbd>5</kbd>Flat</button>
+    <span class="sep"></span>
+    <button data-act="paint"><kbd>F</kbd>Paint</button>
+    <button data-act="clone"><kbd>C</kbd>Clone <em id="cloneLeft"></em></button>
+    <button data-act="taunt"><kbd>Q</kbd>Taunt</button>
+    <button data-act="ready" id="readyBtn"><kbd>Enter</kbd>Ready</button>
+  </div>
+
+  <aside id="paintPanel" class="hidden">
+    <header><h3>Paint your body</h3><button id="paintDone" class="primary">Done <kbd>F</kbd></button></header>
+    <div class="tools">
+      <button data-tool="brush" class="on" title="Brush (B)">Brush</button>
+      <button data-tool="mimic" title="Mimic brush (M): paints whatever is behind you from this angle">Mimic</button>
+      <button data-tool="picker" title="Eyedropper (I) — click the room to sample">Eyedropper</button>
+      <button data-tool="fill" title="Fill whole body (G)">Fill</button>
+    </div>
+    <div class="row colorrow">
+      <input type="color" id="color" value="#7a4a2c">
+      <div id="swatches"></div>
+    </div>
+    <label>Brush size <span id="sizeVal">10</span><input type="range" id="brushSize" min="2" max="48" value="10"></label>
+    <label>Roughness <span id="roughVal">0.85</span><input type="range" id="rough" min="0" max="100" value="85"></label>
+    <label>Shine <span id="metalVal">0.00</span><input type="range" id="metal" min="0" max="100" value="0"></label>
+    <div class="ink"><span>Mimic ink</span><div class="bar"><i id="inkBar"></i></div></div>
+    <div class="row">
+      <button id="undoBtn">Undo <kbd>Ctrl Z</kbd></button>
+      <button id="clearBtn">Wipe white</button>
+    </div>
+    <div class="group">
+      <span>Shape</span>
+      <div class="seg" id="shapeSeg"><button data-shape="blob" class="on">Blob</button><button data-shape="cube">Cube</button></div>
+    </div>
+    <div class="group">
+      <span>Size</span>
+      <div class="seg" id="sizeSeg"><button data-size="petite">Petite</button><button data-size="normal" class="on">Normal</button><button data-size="plump">Plump</button></div>
+    </div>
+    <div class="poses">
+      <button data-pose="stand">Stand</button><button data-pose="crouch">Crouch</button><button data-pose="curl">Curl</button><button data-pose="lie">Lie</button><button data-pose="flat">Flat</button>
+    </div>
+    <div class="group">
+      <span>Turn</span>
+      <div class="seg"><button id="rotL">⟲ <kbd>Z</kbd></button><button id="rotR">⟳ <kbd>X</kbd></button></div>
+    </div>
+    <p class="tip">Left-drag paints · Right-drag orbits · Scroll zooms · Alt+click samples a colour</p>
+  </aside>
+</div>
+
+<section id="screen-menu" class="screen">
+  <div class="card menu">
+    <div class="logo"><span class="c1">Meccha</span> <span class="c2">Chameleon</span></div>
+    <p class="tag">Paint your body. Strike a pose. Become the wallpaper.</p>
+    <div class="modes">
+      <button class="mode on" data-mode="hide">
+        <b>Hide</b>
+        <span>You're the chameleon. Paint yourself to match the mansion and survive the AI hunters.</span>
+      </button>
+      <button class="mode" data-mode="seek">
+        <b>Seek</b>
+        <span>You're the hunter. AI chameleons have painted themselves somewhere. Bonk them all.</span>
+      </button>
+      <button class="mode" data-mode="party">
+        <b>Party</b>
+        <span>Pass &amp; play on one PC. Friends take turns hiding, then one of you hunts.</span>
+      </button>
+    </div>
+    <div class="opts">
+      <div class="group"><span>Difficulty</span>
+        <div class="seg" id="diffSeg"><button data-diff="easy">Easy</button><button data-diff="normal" class="on">Normal</button><button data-diff="hard">Hard</button></div>
+      </div>
+      <div class="group party-only hidden"><span>Human hiders</span>
+        <div class="seg" id="humanSeg"><button data-n="1">1</button><button data-n="2" class="on">2</button><button data-n="3">3</button><button data-n="4">4</button></div>
+      </div>
+      <div class="group party-only hidden"><span>AI hiders</span>
+        <div class="seg" id="aiSeg"><button data-n="0">0</button><button data-n="1" class="on">1</button><button data-n="2">2</button><button data-n="3">3</button></div>
+      </div>
+    </div>
+    <button id="playBtn" class="primary big">Play</button>
+    <details>
+      <summary>How to play</summary>
+      <div class="howto">
+        <div><h4>Hiding</h4>
+          <p><kbd>WASD</kbd> move · <kbd>Mouse</kbd> look · <kbd>Space</kbd> jump · <kbd>Shift</kbd> sneak<br>
+          <kbd>F</kbd> paint mode · <kbd>1-5</kbd> poses · <kbd>Z</kbd>/<kbd>X</kbd> turn · <kbd>C</kbd> clone decoy · <kbd>Q</kbd> taunt (points, but they hear it) · <kbd>Enter</kbd> skip prep</p>
+          <p>Use the eyedropper on the surface you're hiding against, block in the colours, then pose. <b>Flat</b> snaps your back to the nearest wall. Hunters judge you on what they actually <i>see</i>: contrast with what's behind you, your shadow and movement all count. Moving while watched is a giveaway.</p></div>
+        <div><h4>Seeking</h4>
+          <p><kbd>WASD</kbd> move · <kbd>Mouse</kbd> look · <kbd>Click</kbd> bonk · <kbd>Space</kbd> jump</p>
+          <p>Look for colour blobs that don't belong, shapes repeated in the wrong spot, odd bumps on walls and floors. Hiders are forced to whistle every so often, so listen.</p></div>
+      </div>
+    </details>
+    <p class="credit">Fan-made tribute to <i>MECCHA CHAMELEON</i> by lemorion_1224 &amp; Haganeiro. Get the real thing on Steam.</p>
+  </div>
+</section>
+
+<section id="screen-hand" class="screen hidden">
+  <div class="card small">
+    <h2 id="handTitle">Hider 1</h2>
+    <p id="handText">Take the mouse. Everyone else, look away!</p>
+    <button id="handGo" class="primary big">I'm ready</button>
+  </div>
+</section>
+
+<section id="screen-end" class="screen hidden">
+  <div class="card small">
+    <h2 id="endTitle">Round over</h2>
+    <p id="endText"></p>
+    <ul id="endList"></ul>
+    <div class="row center">
+      <button id="revealBtn" class="big">Show hiding spots</button>
+      <button id="againBtn" class="primary big">Play again</button>
+      <button id="menuBtn" class="big">Menu</button>
+    </div>
+  </div>
+</section>
+
+<section id="screen-pause" class="screen hidden">
+  <div class="card small">
+    <h2>Paused</h2>
+    <p>Click to jump back in.</p>
+    <div class="row center">
+      <button id="resumeBtn" class="primary big">Resume</button>
+      <button id="quitBtn" class="big">Quit to menu</button>
+    </div>
+  </div>
+</section>
+
+<section id="screen-load" class="screen hidden">
+  <div class="card small"><h2 id="loadTitle">Chameleons are painting…</h2><div class="spinner"></div></div>
+</section>
+
+<script src="three.min.js"></script>
+<script src="world.js"></script>
+<script src="game.js"></script>
+</body>
+</html>
