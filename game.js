@@ -501,6 +501,7 @@ class Hunter {
         if (vis < 2) continue;
         seen.add(t);
         let gain = s * D.K * dt * AREA_COMP;
+        if (t.buried) gain += 0.9 * dt;
         if (t.speed > 0.4) gain += D.motion * dt * Math.min(1, vis * AREA_COMP / 30);
         gains.set(t, gain);
         this.sus.set(t, (this.sus.get(t) || 0) + gain);
@@ -555,6 +556,7 @@ const G = {
     this.stats = { taunts: 0, clonesFooled: 0, maxSus: 0, start: 0, finds: 0, splats: 0 };
     if (MAP) setGate(true);
     UI.paintPanel(false); toolVM.visible = false; UI.blind(false); UI.wheel(false);
+    Cues.clear(); Seeker.clear(); Seeker.reset(); this.intro = null; UI.buried?.(0, false);
   },
 
   /* ---------- round setup (shared by solo, party and online) ---------- */
@@ -574,9 +576,14 @@ const G = {
       await nextFrame();
       const c = new Cham({ id: 'aih' + i + uid(), name: names[i % names.length], shape: pick(Object.keys(SHAPES)), eyes: pick(Object.keys(EYES)), color: TAG_COLORS[(i + 3) % TAG_COLORS.length] });
       if (Math.random() < 0.2) c.setSize('petite');
-      const s = findSpot(c, taken); taken.push(s);
-      c.root.position.set(s.x, s.y, s.z); c.setYaw(s.yaw); c.setPose(s.pose, true);
-      if (POSES[s.pose].wall) snapToWall(c, 1.2);
+      let s = null;
+      for (let k = 0; k < 8; k++) {
+        s = findSpot(c, taken);
+        c.root.position.set(s.x, s.y, s.z); c.setYaw(s.yaw); c.setPose(s.pose, true);
+        if (POSES[s.pose].wall) snapToWall(c, 1.2);
+        if (Buried.check(c) < 0.08) break;
+      }
+      taken.push(s);
       autoCamo(c, cfg.skill || D.hiderSkill);
       const p = c.root.position;
       aiHiders.push({ id: c.id, name: c.name, shape: c.shape, eyes: c.eyes, size: c.size, pose: c.pose, x: p.x, y: p.y, z: p.z, yaw: c.yaw, rough: c.mat.roughness, color: c.color, tex: c.texURL() });
@@ -602,26 +609,33 @@ const G = {
       c.mat.roughness = a.rough; c.loadTex(a.tex); c.ai = true;
       this.hiders.push(c);
     }
-    const hs = MAP.hunterSpawns; let hi = 0, ci = 0;
+    let hi = 0, ci = 0;
+    // Spread hider spawns: everyone gets their own free spot round the map's spawn, in the same order on every client.
+    const hiderIds = P.players.filter((p) => p.role === 'hider').map((p) => p.id).sort();
+    const spots = Spawns.hiderSpots(Math.max(1, hiderIds.length));
+    let mySpot = null;
     for (const p of P.players) {
       const local = p.id === this.myId, prof = p.profile || PROFILE;
       if (p.role === 'hider') {
         const c = new Cham({ id: p.id, name: p.name, ownerId: p.id, local, human: true, color: prof.tag, shape: prof.cham?.shape, eyes: prof.cham?.eyes });
-        const a = ci++ * 2.4, r = ci > 1 ? 1.4 : 0;
-        c.root.position.set(MAP.playerSpawn[0] + Math.cos(a) * r, 0, MAP.playerSpawn[1] + Math.sin(a) * r);
-        c.setYaw(Math.PI); if (local) this.my = c;
+        const sp = spots[Math.max(0, hiderIds.indexOf(p.id))] || spots[ci]; ci++;
+        c.root.position.set(sp.x, 0, sp.z);
+        c.setYaw(sp.yaw); if (local) { this.my = c; mySpot = sp; }
         if (P.partyHidden) c.root.visible = false;
         this.hiders.push(c);
       } else if (p.role === 'hunter') {
-        const [x, z] = hs[hi++ % hs.length];
+        const [x, z] = Spawns.hunterSpot(hi++);
         const h = new Hunter({ id: p.id, name: p.name, avatar: prof.hunter || randomHunterAvatar(hi), ai: false, local, x, z });
-        if (local) { this.myHunter = h; h.group.visible = false; this.fp = { pos: new V3(x, 0, z), vy: 0, onGround: true, r: 0.3, h: 1.75, yaw: Math.PI, pitch: 0 }; }
+        const gy = Spawns.gateYaw(x, z);
+        if (local) { this.myHunter = h; h.group.visible = false; this.fp = { pos: new V3(x, 0, z), vy: 0, onGround: true, r: 0.3, h: 1.75, yaw: gy + Math.PI, pitch: 0 }; }
         this.hunters.push(h);
       }
     }
-    for (const a of P.aiHunters) { const [x, z] = hs[hi++ % hs.length]; const h = new Hunter({ ...a, ai: true, x, z }); h.yaw = h.look = Math.atan2(MAP.playerSpawn[0] - x, MAP.playerSpawn[1] - z) + Math.PI; h.sync(); this.hunters.push(h); }
+    for (const a of P.aiHunters) { const [x, z] = Spawns.hunterSpot(hi++); const h = new Hunter({ ...a, ai: true, x, z }); h.yaw = h.look = Spawns.gateYaw(x, z); h.sync(); this.hunters.push(h); }
     this.view = this.my ? 'third' : this.fp ? 'first' : 'spec';
-    this.ctrl.yaw = 0;
+    this.ctrl.yaw = mySpot ? mySpot.yaw + Math.PI : 0;
+    Spawns.gateSign();
+    if (this.my && !P.partyHidden) Spawns.intro(this.my);
     toolVM.visible = false;
     if (this.fp) setToolVM(this.myHunter.avatar.tool);
     this.stats.start = 0;
@@ -688,17 +702,19 @@ const G = {
     const P = this.party;
     if (P.idx < P.order.length) {
       const c = this.my = P.order[P.idx]; c.local = true;
-      c.root.visible = true; c.root.position.set(MAP.playerSpawn[0], 0, MAP.playerSpawn[1]); c.setYaw(Math.PI);
-      this.view = 'third'; this.ctrl.yaw = 0; this.ink = 100;
+      const sp = Spawns.hiderSpots(1)[0];
+      c.root.visible = true; c.root.position.set(sp.x, 0, sp.z); c.setYaw(sp.yaw);
+      this.view = 'third'; this.ctrl.yaw = sp.yaw + Math.PI; this.ink = 100;
+      Spawns.intro(c);
       this.ab.clones = AB.clones; this.ab.decoys = AB.decoys;
       this.setPhase('prep', this.P.cfg.prep);
     } else {
       if (this.my) this.my.local = false;
       this.my = null;
-      const [x, z] = MAP.hunterSpawns[0];
+      const [x, z] = Spawns.hunterSpot(0);
       const h = new Hunter({ id: 'me', name: 'Seeker', avatar: PROFILE.hunter, ai: false, local: true, x, z }); h.group.visible = false;
       this.hunters.push(h); this.myHunter = h;
-      this.fp = { pos: new V3(x, 0, z), vy: 0, onGround: true, r: 0.3, h: 1.75, yaw: Math.PI, pitch: 0 };
+      this.fp = { pos: new V3(x, 0, z), vy: 0, onGround: true, r: 0.3, h: 1.75, yaw: Spawns.gateYaw(x, z) + Math.PI, pitch: 0 };
       setToolVM(PROFILE.hunter.tool);
       this.view = 'first';
       this.setPhase('prep', 5);
@@ -752,7 +768,7 @@ const G = {
         floatLabel(`${c.name} found!`, c.center(), '#ff5d6c', '#fff');
         for (const h of this.hunters) h.sus.delete(c);
         if (by) by.doSwing();
-        if (by && by === this.myHunter) this.stats.finds++;
+        if (by && by === this.myHunter) { this.stats.finds++; Seeker.refill(); }
         feed(`<b>${esc(by ? by.name : 'A hunter')}</b> found <b>${esc(c.name)}</b>`, 'bad');
         if (c === this.my) {
           if (this.P.mode !== 'infection') { banner(by ? by.name + ' found you' : 'Found', 'Caught!', 'Spectating. 1-9 to switch hunters.', 'hunter', 2000); Sound.lose(); this.view = 'spec'; this.specIdx = 0; if (this.paint) togglePaint(); UI.wheel(false); }
@@ -798,12 +814,14 @@ const G = {
       case 'whistle': {
         const c = this.findCham(ev.id); if (!c || c.caught) break;
         const p = c.center(); Sound.whistle(p); noteSprite(p);
+        if (c !== this.my) Cues.add(p, 'whistle', 34);
         if (this.isHost) for (const h of this.hunters) if (h.ai && h.pos.distanceTo(p) < 22 && Math.random() < (ev.chance ?? 0.6)) h.hear(p);
         break;
       }
       case 'step': {
         const c = this.findCham(ev.id); if (!c || c.caught || c === this.my) break;
         const p = new V3(ev.x, ev.y, ev.z); Sound.step(p, 0.22);
+        if (this.view === 'first') Cues.add(p, 'step', 14);
         if (this.isHost) for (const h of this.hunters) if (h.ai && h.pos.distanceTo(p) < 12 && Math.random() < 0.45) h.hear(p, 1.2);
         break;
       }
@@ -815,16 +833,26 @@ const G = {
         break;
       }
       case 'ping': {
-        const p = new V3(ev.x, ev.y || 0, ev.z); Sound.ping(p.clone().setY(1.5)); pingRing(p);
+        // Sonar: a wave rolls out from the hunter; every chameleon it reaches chirps when the wave gets there.
+        const p = new V3(ev.x, ev.y || 0, ev.z); Sound.ping(p.clone().setY(1.5)); pingRing(p); Seeker.wave(p);
+        const h = this.findHunter(ev.id), mine = !!h?.local, hunterView = this.view === 'first';
         let n = 0;
         for (const c of this.targets()) {
-          if (c.root.position.distanceTo(p) > 8.5) continue;
-          n++; setTimeout(() => { if (!c.caught) Sound.chirp(c.center()); }, 350 + Math.random() * 500);
-          if (c === this.my) toast('Pinged! A hunter can hear you chirp.', 'warn');
-          if (this.isHost) { const h = this.findHunter(ev.id); if (h && h.ai && Math.random() < 0.75) h.hear(c.root.position); }
+          const d = c.root.position.distanceTo(p);
+          if (d > SEEK.pingR) continue;
+          if (!c.isClone) n++;
+          const delay = 250 + d / SEEK.pingR * 800 + Math.random() * 200;
+          setTimeout(() => { if (c.caught || G.phase !== 'hunt') return; Sound.chirp(c.center()); if (hunterView) Cues.add(c.center(), 'chirp', 20); }, delay);
+          if (c === this.my) { UI.pinged?.(); Cues.add(p.clone().setY(1.2), 'hunter', 40); }
+          if (this.isHost && h && h.ai && Math.random() < 0.75) h.hear(c.root.position);
         }
-        const h = this.findHunter(ev.id);
-        if (h?.local) toast(n ? `Ping: ${n} chirp${n === 1 ? '' : 's'} nearby. Listen!` : 'Ping: nothing nearby', n ? 'good' : '');
+        if (mine) setTimeout(() => toast(n ? `Ping: ${n} chirp${n === 1 ? '' : 's'} in range. Follow the arcs.` : 'Ping: nobody within 9 m', n ? 'good' : ''), 1150);
+        break;
+      }
+      case 'mark': {
+        const p = new V3(ev.x, ev.y, ev.z), by = this.findHunter(ev.id);
+        if (this.view === 'first' || (this.view === 'spec' && !this.my)) { Seeker.mark(p, ev.id); if (!by?.local) { Cues.add(p, 'mark', 60); Sound.click(); } }
+        if (this.isHost) for (const hh of this.hunters) if (hh.ai && hh.state !== 'chase' && hh.pos.distanceTo(p) < 22) hh.hear(p, 1);
         break;
       }
       case 'pb': if (ev.by !== this.myId) spawnBall(new V3(...ev.p), new V3(...ev.v), false); break;
@@ -839,7 +867,8 @@ const G = {
         if (this.findCham(ev.id)) break;
         const owner = this.findCham(ev.owner); if (!owner) break;
         const c = new Cham({ id: ev.id, name: owner.name + "'s clone", ownerId: owner.ownerId, color: owner.color, shape: owner.shape, eyes: owner.eyes });
-        c.copyFrom(owner); c.isClone = true; c.setPose(ev.pose, true); c.root.position.set(ev.x, ev.y, ev.z); c.setYaw(ev.yaw);
+        c.copyFrom(owner); c.isClone = true; c.setPose(ev.pose, true); c.root.position.set(ev.x, ev.y, ev.z); c.yaw = ev.yaw;
+        c.setOrient(ev.tl || 0, ev.ro || 0, ev.ra ? new V3(...ev.ra) : null);
         this.hiders.push(c); break;
       }
       case 'swing': { const h = this.findHunter(ev.id); if (h && !h.local) { h.doSwing(); Sound.swoosh(h.eye()); } break; }
@@ -943,7 +972,7 @@ const G = {
       const force = this.keepT <= 0; if (force) this.keepT = 1;
       if (this.my && !this.my.caught) {
         const c = this.my, p = c.root.position;
-        const msg = { k: hub ? 'hst' : 'st', a: 'c', id: c.id, p: [+p.x.toFixed(2), +p.y.toFixed(2), +p.z.toFixed(2)], y: +c.yaw.toFixed(2), po: c.pose, sh: c.shape, sz: c.size, r: +c.mat.roughness.toFixed(2), m: +c.mat.metalness.toFixed(2), mv: c.speed > 0.4 ? 1 : 0, sp: c.sprinting ? 1 : 0, em: c.emote || 0, air: c.body.onGround ? 0 : 1 };
+        const msg = { k: hub ? 'hst' : 'st', a: 'c', id: c.id, p: [+p.x.toFixed(2), +p.y.toFixed(2), +p.z.toFixed(2)], y: +c.yaw.toFixed(2), po: c.pose, sh: c.shape, sz: c.size, r: +c.mat.roughness.toFixed(2), m: +c.mat.metalness.toFixed(2), mv: c.speed > 0.4 ? 1 : 0, sp: c.sprinting ? 1 : 0, em: c.emote || 0, air: c.body.onGround ? 0 : 1, tl: +c.tilt.toFixed(3), ro: +c.roll.toFixed(3), ra: c.roll ? [+c.rollAxis.x.toFixed(3), +c.rollAxis.z.toFixed(3)] : 0, bu: c.buried ? 1 : 0 };
         if (hub) { msg.ready = this.hub.ready ? 1 : 0; msg.vote = this.hub.vote; msg.name = PROFILE.name; msg.eyes = c.eyes; msg.tag = PROFILE.tag; }
         const sig = JSON.stringify(msg);
         if (force || sig !== this.lastSig) { this.lastSig = sig; Net.relay(msg); }
@@ -970,7 +999,7 @@ const G = {
     switch (d.k) {
       case 'start': if (fromHost) this.setupRound(d.P); break;
       case 'late': if (fromHost && (this.phase === 'hub' || this.phase === 'menu')) this.joinLate(d); break;
-      case 'ev': if (fromHost || ['whistle', 'clone', 'swing', 'ping', 'pb', 'splat', 'splatw', 'decoy', 'step'].includes(d.ev.e)) this.applyEvent(d.ev); break;
+      case 'ev': if (fromHost || ['whistle', 'clone', 'swing', 'ping', 'pb', 'splat', 'splatw', 'decoy', 'step', 'mark'].includes(d.ev.e)) this.applyEvent(d.ev); break;
       case 'tag': if (this.isHost) this.hostTag(d.target, d.by); break;
       case 'timer': if (fromHost && Math.abs(this.timer - d.t) > 0.6) this.timer = d.t; break;
       case 'ai': if (!fromHost) break; for (const [id, x, y, z, yaw, st] of d.list) { const h = this.findHunter(id); if (h) { h.target = { x, y, z, yaw }; if (h.state !== st && st === 'chase') Sound.alert(h.eye()); h.state = st; } } break;
@@ -1033,6 +1062,8 @@ function applyRemoteCham(c, d) {
   if (d.em && c.emote !== d.em) c.setEmote(d.em); else if (!d.em && c.emote) c.emote = null;
   c.mat.roughness = d.r; c.mat.metalness = d.m;
   c.target = { x: d.p[0], y: d.p[1], z: d.p[2], yaw: d.y }; c.remoteMoving = d.mv; c.sprinting = !!d.sp; c.body.onGround = !d.air;
+  if ((d.tl || 0) !== c.tilt || (d.ro || 0) !== c.roll) c.setOrient(d.tl || 0, d.ro || 0, d.ra ? new V3(d.ra[0], 0, d.ra[1]) : null);
+  if (!!d.bu !== !!c.buried) c.setBuried(!!d.bu);
 }
 function unlockName(kind, k) {
   const label = { shape: SHAPES[k]?.label, eyes: EYES[k], hat: HATS[k], visor: VISORS[k], tool: TOOLS[k] }[kind];
@@ -1327,7 +1358,7 @@ addEventListener('keyup', (e) => {
   keys[e.code] = false;
   if ((e.code === 'KeyG' || e.code === 'KeyR') && UI.wheelOpen && UI.wheelHold) {
     if (performance.now() - wheelKey.t < 220) { UI.wheelHold = false; return; }
-    const pk = UI.wheelHover; UI.wheel(false); if (pk) { if (POSES[pk]) setPose(pk); else G.my?.setEmote(pk); } G.lock();
+    UI.wheelPick(UI.wheelHover);
   }
 });
 function sprintHeld() { return keys.ShiftLeft || keys.ShiftRight; }
@@ -1350,12 +1381,18 @@ function onKey(e) {
     if (e.code === 'Escape') togglePaint();
   }
   if (G.view === 'first' && G.phase === 'hunt' && e.code === 'KeyE') { hunterPing(); return; }
+  if (G.view === 'first' && G.phase === 'hunt' && e.code === 'KeyQ') { hunterMark(); return; }
   if (!controllable()) { if (G.view === 'spec' && /Digit[1-9]/.test(e.code)) G.specIdx = +e.code.slice(5) - 1; return; }
   if (e.code === 'KeyG' || e.code === 'KeyR') { if (UI.wheelOpen) { UI.wheel(false); G.lock(); } else { wheelKey.t = performance.now(); UI.wheel(true, true); } return; }
   if (G.paint) return;
   if (P.stick) {
-    if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') { unstick(P, true); return; }
-  } else if (e.code === 'Space' && !P.body.onGround && tryStick(P)) return;
+    if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') { Stick.release(P, true); return; }
+    if (e.code === 'KeyZ' && !e.ctrlKey) { Stick.rollBy(P, Math.PI / 12); return; }
+    if (e.code === 'KeyX') { Stick.rollBy(P, -Math.PI / 12); return; }
+  } else if (e.code === 'Space' && !e.repeat) {
+    if (!P.body.onGround) { if (Stick.tryAttach(P, false)) return; }
+    else if (P.lastMoveT != null && G.t - P.lastMoveT < 0.25 && Stick.tryAttach(P, true)) return;
+  }
   const pk = POSE_ORDER.find((k) => POSES[k].key && 'Digit' + POSES[k].key === e.code);
   if (pk) setPose(pk);
   if (e.code === 'KeyZ' && !e.ctrlKey) P.setYaw(P.yaw + Math.PI / 12);
@@ -1366,37 +1403,24 @@ function onKey(e) {
   if (e.code === 'KeyV') decoy();
 }
 function setPose(p) {
-  const P = G.my; if (!P) return;
-  if (POSES[p]?.emote) { P.setEmote(p); return; }
-  if (P.stick && !POSES[p].wall) unstick(P, false);
+  const P = G.my; if (!P || !POSES[p]) return;
+  if (POSES[p].emote) { if (P.stick) { toast('Emotes need your feet on the floor'); return; } P.setEmote(p); return; }
+  if (P.stick) { P.pose = p; Stick.repose(P); UI.refreshBars(); UI.prompts?.(); return; }
   P.setPose(p);
-  if (POSES[p].wall && !P.stick) { if (snapToWall(P)) stickAt(P, P.root.position.y); }
+  if (POSES[p].wall) {
+    const dirs = []; for (let i = 0; i < 12; i++) { const a = i / 12 * Math.PI * 2; dirs.push(new V3(Math.sin(a), 0, Math.cos(a))); }
+    const hit = Stick.probe(P, dirs);
+    if (hit && hit.d < 0.9) Stick.attach(P, hit);
+  }
   UI.refreshBars();
 }
-/* Wall-stick: Space in the air next to a wall grabs it (or pick Flat/Star), Space/C climb, Shift lets go. */
-function stickAt(P, y) {
-  P.stick = { y: clamp(y, 0, Math.max(0, MAP.ceilH - 1.1 * CHAM_H)) };
-  P.body.vy = 0; P.root.position.y = P.stick.y; Sound.thud();
-}
-function tryStick(P) {
-  const c = P.root.position.clone(); c.y += 0.4;
-  const fwd = new V3(Math.sin(P.yaw), 0, Math.cos(P.yaw));
-  const h = envHit(c, fwd, 0.6) || envHit(c, new V3(-Math.sin(G.ctrl.yaw), 0, -Math.cos(G.ctrl.yaw)), 0.6);
-  if (!h) return false;
-  const y = P.root.position.y;
-  P.setPose('flat'); if (!snapToWall(P, 0.8)) { P.setPose('stand'); return false; }
-  stickAt(P, y); UI.refreshBars(); toast('Stuck to the wall · Space up · C down · Shift let go'); return true;
-}
-function unstick(P, hop) {
-  if (!P.stick) return; P.stick = null;
-  if (hop) { const fwd = new V3(Math.sin(P.yaw), 0, Math.cos(P.yaw)); P.root.position.addScaledVector(fwd, 0.12); P.setPose('stand'); P.body.vy = 1.5; UI.refreshBars(); }
-}
+/* Wall and ceiling sticking lives in systems.js (Stick). */
 function emitAny(ev) { if (G.online) Net.relay({ k: 'ev', ev }); G.applyEvent(ev); }
 function makeClone() {
   if (G.ab.clones <= 0) { toast('No clones left'); return; }
   const P = G.my, p = P.root.position;
   G.ab.clones--; UI.refreshBars();
-  emitAny({ e: 'clone', id: 'cl' + uid(), owner: P.id, x: p.x, y: p.y, z: p.z, yaw: P.yaw, pose: P.pose });
+  emitAny({ e: 'clone', id: 'cl' + uid(), owner: P.id, x: p.x, y: p.y, z: p.z, yaw: P.yaw, pose: P.pose, tl: P.tilt, ro: P.roll, ra: [P.rollAxis.x, P.rollAxis.y, P.rollAxis.z] });
   toast('Clone placed. Now sneak somewhere else!', 'good'); Sound.splat();
 }
 function taunt() {
@@ -1418,10 +1442,21 @@ function decoy() {
   toast('Decoy thrown. Hunters will check it out.', 'good');
 }
 function hunterPing() {
-  if (G.ab.ping > 0 || !G.fp) return;
+  if (!G.fp) return;
+  if (G.ab.ping > 0) { toast(`Ping recharging: ${Math.ceil(G.ab.ping)}s`); return; }
   G.ab.ping = AB.pingCD;
   const p = G.fp.pos;
   emitAny({ e: 'ping', id: G.myHunter.id, x: p.x, y: p.y, z: p.z });
+}
+/** Hunter team mark (Q / middle mouse): a "check here" marker only hunters see; AI teammates go look. */
+function hunterMark() {
+  if (!G.fp || !G.myHunter) return;
+  if ((G.ab.markT || 0) > G.t) return;
+  G.ab.markT = G.t + 1.2;
+  const dir = new V3(); camera.getWorldDirection(dir);
+  const h = envHit(camera.position, dir, 30);
+  const p = h ? h.point.clone().addScaledVector(dir, -0.1) : camera.position.clone().addScaledVector(dir, 12);
+  emitAny({ e: 'mark', id: G.myHunter.id, x: +p.x.toFixed(2), y: +p.y.toFixed(2), z: +p.z.toFixed(2) });
 }
 function shootPaint() {
   if (G.ab.ammo < 1) { toast('Out of paintballs. They recharge.'); return; }
@@ -1436,7 +1471,7 @@ renderer.domElement.addEventListener('mousedown', (e) => {
   Sound.init();
   if (!active() || G.paint || UI.wheelOpen || UI.panelOpen) return;
   if (!document.pointerLockElement) { G.lock(); return; }
-  if (G.view === 'first' && G.phase === 'hunt') { if (e.button === 0) bonk(); else if (e.button === 2) shootPaint(); }
+  if (G.view === 'first' && G.phase === 'hunt') { if (e.button === 0) bonk(); else if (e.button === 2) shootPaint(); else if (e.button === 1) { e.preventDefault(); hunterMark(); } }
 });
 document.addEventListener('pointerlockchange', () => {
   const locked = !!document.pointerLockElement;
@@ -1527,12 +1562,15 @@ function togglePaint() {
 const rcBonk = new THREE.Raycaster();
 function bonk() {
   if (swingT > 0) return;
+  if (!Seeker.canSwing()) { toast(`Out of tags. Next one in ${Math.ceil(SEEK.tagRegen - G.ab.tagT)}s`, 'warn'); Sound.click(); return; }
   swingT = 0.32; Sound.swoosh(null);
   if (G.online) Net.relay({ k: 'ev', ev: { e: 'swing', id: G.myHunter.id } });
   rcBonk.setFromCamera(new THREE.Vector2(0, 0), camera); rcBonk.far = 3.3;
   const meshes = G.targets().map((c) => c.mesh);
   const h = rcBonk.intersectObjects([...env, ...meshes], false)[0];
-  if (h && h.object.userData.cham) { Sound.bonk(h.point); G.requestTag(h.object.userData.cham.id); }
+  const cham = h && h.object.userData.cham;
+  Seeker.onSwing(!!cham, !!h && !cham);
+  if (cham) { Sound.bonk(h.point); G.requestTag(cham.id); }
   else if (h) Sound.thud();
 }
 
@@ -1542,14 +1580,10 @@ function updateMyCham(dt) {
   if (!P || P.caught) return;
   let moving = false;
   const free = !G.paint && !UI.chatOpen && !UI.wheelOpen && !UI.panelOpen && !G.paused;
+  if (G.intro && G.intro.t < 1.1) { P.animate(dt, false); collideBody(P.body, dt, true); return; }
   if (P.stick) {
-    if (free) {
-      if (keys.Space) P.stick.y += dt * 1.1; if (crouchHeld()) P.stick.y -= dt * 1.1;
-      P.stick.y = clamp(P.stick.y, 0, Math.max(0, MAP.ceilH - 1.1 * CHAM_H));
-      let side = 0; if (keys.KeyA) side -= 1; if (keys.KeyD) side += 1;
-      if (side) { const rx = Math.cos(P.yaw), rz = -Math.sin(P.yaw); P.root.position.x += rx * side * dt * 0.9; P.root.position.z += rz * side * dt * 0.9; if (!snapToWall(P, 0.6)) unstick(P, false); }
-    }
-    if (P.stick) { P.root.position.y = P.stick.y; P.body.vy = 0; collideBody(P.body, dt, false); P.root.position.y = P.stick.y; P.animate(dt, false); return; }
+    Stick.update(P, dt, free);
+    if (P.stick) { P.animate(dt, false); return; }
   }
   if (free) {
     let mx = 0, mz = 0;
@@ -1562,6 +1596,7 @@ function updateMyCham(dt) {
     if (moving) {
       const y = G.ctrl.yaw, fx = -Math.sin(y), fz = -Math.cos(y), rx = Math.cos(y), rz = -Math.sin(y);
       let vx = fx * -mz + rx * mx, vz = fz * -mz + rz * mx; const l = Math.hypot(vx, vz); vx /= l; vz /= l;
+      P.lastMove = (P.lastMove || new V3()).set(vx, 0, vz); P.lastMoveT = G.t;
       const sprint = sprintHeld() && G.stam > 0.02 && !G.tired && P.pose === 'stand';
       P.sprinting = sprint;
       const sp = 3.4 * (sprint ? 1.65 : 1) * (POSES[P.pose].speed || 1) * (P.size === 'petite' ? 0.85 : 1);
@@ -1628,13 +1663,13 @@ function updateFP(dt) {
   toolVM.rotation.set(0.4 - s * 1.5, 0, -0.3); toolVM.position.set(0.34, -0.5 + bob, -0.6 - s * 0.1);
   if (G.myHunter) { G.myHunter.pos.copy(f.pos); G.myHunter.yaw = f.yaw + Math.PI; G.myHunter.sync(); }
   rcBonk.setFromCamera(new THREE.Vector2(0, 0), camera); rcBonk.far = 3.3;
-  UI.crossHot(!!rcBonk.intersectObjects(env, false)[0]);
+  UI.crossHot(!!rcBonk.intersectObjects([...env, ...G.targets().map((c) => c.mesh)], false)[0]);
 }
 const camTarget = new V3();
 function thirdCam(target, yaw, pitch, dist, dt, snap) {
   const dir = new V3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
   const h = envHit(target, dir, dist + 0.3);
-  const d = h ? Math.max(0.4, h.distance - 0.25) : dist;
+  const d = h ? (h.distance < 0.7 ? Math.max(0.08, h.distance - 0.12) : Math.max(0.4, h.distance - 0.25)) : dist;
   const want = target.clone().addScaledVector(dir, d);
   if (snap) camera.position.copy(want); else camera.position.lerp(want, Math.min(1, dt * 14));
   camera.lookAt(target);
@@ -1649,7 +1684,15 @@ function updateCamera(dt) {
   }
   const P = G.my; if (!P) return;
   if (G.paint) thirdCam(P.center(), G.paintCam.yaw, G.paintCam.pitch, G.paintCam.dist, dt, true);
-  else { camTarget.copy(P.root.position); camTarget.y += Math.max(0.32, Math.min(P.body.h, CHAM_H) * 0.95); thirdCam(camTarget, G.ctrl.yaw, G.ctrl.pitch, G.ctrl.dist, dt, false); }
+  else {
+    if (P.stick) Stick.camClamp(P, dt);
+    if (P.stick) camTarget.copy(P.center()).addScaledVector(P.stick.n, 0.15); else { camTarget.copy(P.root.position); camTarget.y += Math.max(0.32, Math.min(P.body.h, CHAM_H) * 0.95); }
+    if (G.intro) {
+      const dir = new V3(Math.sin(G.ctrl.yaw) * Math.cos(G.ctrl.pitch), Math.sin(G.ctrl.pitch), Math.cos(G.ctrl.yaw) * Math.cos(G.ctrl.pitch));
+      const h = envHit(camTarget, dir, G.ctrl.dist + 0.3), want = camTarget.clone().addScaledVector(dir, h ? Math.max(0.4, h.distance - 0.25) : G.ctrl.dist);
+      Spawns.introCam(dt, camTarget, want);
+    } else thirdCam(camTarget, G.ctrl.yaw, G.ctrl.pitch, G.ctrl.dist, dt, false);
+  }
 }
 let lastTickSec = -1, hudT = 0;
 /* ---------- AI hiders: hold still, but bolt for a new spot when a hunter is closing in on them ---------- */
@@ -1720,6 +1763,10 @@ function update(dt) {
   const sec = Math.ceil(G.timer);
   if (sec <= 10 && sec !== lastTickSec && sec > 0) { lastTickSec = sec; Sound.tick(); }
   if (G.view === 'first') updateFP(dt); else updateMyCham(dt);
+  Buried.tick(G.view === 'third' ? G.my : null, dt);
+  for (const c of G.hiders) Spawns.tickPop(c, dt);
+  Spawns.tickSign(); Cues.tick(dt);
+  if (G.myHunter || Seeker.marks.length || Seeker.waves.length) Seeker.tick(dt);
   if (G.isHost && G.phase === 'hunt') updateAIHiders(dt);
   for (const c of G.hiders) {
     if (!c.local && c.target) {

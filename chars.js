@@ -107,11 +107,25 @@ const POSES = {
   tpose: { label: 'T-pose', arm: [[1, 0, 0], [1, 0, 0]], leg: STAND.leg },
   kneel: { label: 'Kneel', bend: 0.08, arm: [[0.3, -0.7, 0.55], [0.1, -0.9, 0.5]], leg: [[0.12, -0.15, 1], [0.06, -1, 0.05]], legR: [[-0.1, -1, 0.05], [-0.03, -0.02, -1]] },
   thinker: { label: 'Thinker', bend: 0.35, head: [0.2, 0], arm: [[0.25, -0.7, 0.6], [0.05, -0.3, 1]], armR: [[-0.2, -0.75, 0.7], [-0.05, 1, 0.25]], leg: [[0.12, -0.04, 1], [0.08, -1, 0.1]] },
+  tuck: { label: 'Tuck', bend: 0.85, head: [0.7, 0], arm: [[0.18, -0.55, 0.85], [-0.6, -0.45, 0.7]], leg: [[0.1, 0.55, 1], [0.04, -1, -0.25]] },
+  slant: { label: 'Slanted', root: [-0.95, 0, 0], arm: [[0.2, -1, 0.02], [0.12, -1, 0.02]], leg: [[0.05, -1, 0], [0.04, -1, 0]] },
+  backbend: { label: 'Backbend', root: [-0.55, 0, 0], bend: -1.1, head: [-0.8, 0], arm: [[0.35, 0.85, -0.45], [0.15, 0.6, -0.8]], leg: [[0.12, -0.6, 0.8], [0.06, -1, -0.15]] },
+  plank: { label: 'Plank', root: [PI / 2, 0, 0], arm: [[0.25, 0.15, 1], [0.15, 1, 0.1]], leg: [[0.05, -1, 0], [0.04, -1, 0]] },
   wave: { label: 'Wave', emote: true, ...STAND },
   dance: { label: 'Dance', emote: true, ...STAND },
   cheer: { label: 'Cheer', emote: true, ...STAND },
+  clap: { label: 'Clap', emote: true, ...STAND },
+  shrug: { label: 'Shrug', emote: true, ...STAND },
 };
-const POSE_ORDER = ['stand', 'crouch', 'sit', 'curl', 'lie', 'prone', 'side', 'flat', 'star', 'reach', 'tpose', 'kneel', 'thinker'];
+const POSE_ORDER = ['stand', 'crouch', 'sit', 'curl', 'lie', 'prone', 'side', 'flat', 'star', 'reach', 'tpose', 'kneel', 'thinker', 'tuck', 'slant', 'backbend', 'plank'];
+/* Pose wheel pages (hold R/G, point, release; click to change page). */
+const POSE_PAGES = [
+  { name: 'Poses', list: ['stand', 'crouch', 'sit', 'curl', 'lie', 'prone', 'side', 'kneel'] },
+  { name: 'Shapes', list: ['flat', 'star', 'slant', 'backbend', 'tuck', 'plank', 'reach', 'tpose', 'thinker'] },
+  { name: 'Emotes', list: ['wave', 'dance', 'cheer', 'clap', 'shrug'] },
+];
+/** Poses that lie on the floor: stuck to a wall they turn so the side that was on the floor touches the wall. */
+const lyingPose = (p) => { const r = POSES[p]?.root; return !!r && (Math.abs(r[0]) > 0.5 || Math.abs(r[2]) > 0.5); };
 const SIZES = { petite: [0.72, 0.72], normal: [1, 1], plump: [1.32, 1.04] };
 
 const _q1 = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _e = new THREE.Euler(), _x = new V3(1, 0, 0), _lean = new THREE.Quaternion();
@@ -155,6 +169,8 @@ function poseTargets(G, def, anim = {}) {
 function emoteAnim(kind, t) {
   if (kind === 'wave') return { override: (aL, aR, lL, lR) => ({ aL: [[0.55, 0.9, 0.15], [Math.sin(t * 9) * 0.7, 1, 0.2]] }), armsFixed: true };
   if (kind === 'cheer') { const u = Math.abs(Math.sin(t * 6)); return { override: () => ({ aL: [[0.4, 1, 0], [0.2 + u * 0.3, 1, 0]], aR: [[-0.4, 1, 0], [-0.2 - u * 0.3, 1, 0]] }), bounce: u * 0.12 }; }
+  if (kind === 'clap') { const u = Math.abs(Math.sin(t * 9)); return { override: () => ({ aL: [[0.3, -0.2, 1], [-0.25 - u * 0.5, 0.15, 1]], aR: [[-0.3, -0.2, 1], [0.25 + u * 0.5, 0.15, 1]] }), armsFixed: true, bounce: u * 0.02 }; }
+  if (kind === 'shrug') { const u = Math.min(1, t * 3) * (t < 1.6 ? 1 : Math.max(0, 1 - (t - 1.6) * 3)); return { headP: -0.15 * u, headY: 0.25 * u, override: () => ({ aL: [[0.75, -0.6 + u * 0.4, 0.1], [0.55, 0.6 * u, 0.45]], aR: [[-0.75, -0.6 + u * 0.4, 0.1], [-0.55, 0.6 * u, 0.45]] }), armsFixed: true }; }
   if (kind === 'dance') {
     const s = Math.sin(t * 7);
     return { side: s * 0.35, twist: Math.sin(t * 3.5) * 0.4, headY: s * 0.3, bounce: Math.abs(Math.cos(t * 7)) * 0.06,
@@ -295,6 +311,8 @@ class Cham {
     this.shape = SHAPES[shape] ? shape : 'classic'; this.size = 'normal'; this.pose = 'stand'; this.yaw = 0; this.emote = null; this.emoteT = 0;
     this.body = { pos: this.root.position, vy: 0, onGround: true, r: 0.15, h: CHAM_H };
     this.caught = false; this.isClone = false; this.painted = false; this.speed = 0; this.walkT = 0; this.walkAmt = 0; this.texVer = 0; this.t = Math.random() * 10;
+    this.tilt = 0; this.roll = 0; this.rollAxis = new V3(0, 0, 1); this.buried = 0;
+    this.root.rotation.order = 'YXZ';
     this.target = null; this.baseY = 0; this.curBaseY = 0; this.dims = new V3(0.4, CHAM_H, 0.3); this.bbCenter = new V3(0, CHAM_H / 2, 0);
     this.blank();
     this.rebuild();
@@ -332,7 +350,7 @@ class Cham {
     if (snap) { this.curBaseY = this.baseY; rig.group.position.y = this.baseY; }
     else { rig.bones.forEach((b, i) => b.quaternion.copy(keep[i])); rig.rootQ.copy(keepRoot); rig.group.quaternion.copy(keepRoot); }
     this.target_ = T;
-    this.root.rotation.y = this.yaw;
+    this.applyOrient();
   }
   setPose(p, snap = false) { if (!POSES[p] || POSES[p].emote) return; this.emote = null; if (p !== this.pose || snap) { this.pose = p; this.applyPose(snap); } }
   setEmote(kind) { this.emote = kind; this.emoteT = 0; if (this.pose !== 'stand') this.setPose('stand'); }
@@ -343,14 +361,28 @@ class Cham {
     this.rebuild();
   }
   setSize(s) { if (SIZES[s]) { this.size = s; this.applyPose(); } }
-  setYaw(y) { this.yaw = y; this.root.rotation.y = y; }
+  setYaw(y) { this.yaw = y; this.applyOrient(); }
+  /** Root rotation: roll about the surface normal, then yaw, then tilt (wall-lying = PI/2, ceiling = PI). */
+  applyOrient() {
+    this.root.rotation.set(this.tilt, this.yaw, 0, 'YXZ');
+    if (this.roll) this.root.quaternion.premultiply(_q1.setFromAxisAngle(this.rollAxis, this.roll));
+  }
+  setOrient(tilt, roll = 0, axis = null) { this.tilt = tilt; this.roll = roll; if (axis) this.rollAxis.copy(axis); this.applyOrient(); }
+  /** "Buried" warning: flashes the body red so hunters can see someone pushed too far into the map. */
+  setBuried(on) { this.buried = on ? 1 : 0; if (!on) { this.mat.emissive.setRGB(0, 0, 0); this.mat.emissiveIntensity = 1; } }
   halfDepth() { return this.dims.z / 2; }
   center() {
+    if (this.tilt || this.roll) { this.root.updateMatrixWorld(true); return new THREE.Box3().setFromObject(this.mesh).getCenter(new V3()); }
     const c = this.bbCenter, s = Math.sin(this.yaw), co = Math.cos(this.yaw), p = this.root.position;
     return new V3(p.x + c.x * co + c.z * s, p.y + c.y, p.z - c.x * s + c.z * co);
   }
   animate(dt, moving) {
     this.t += dt;
+    if (this.buried) {
+      const slow = typeof SETTINGS !== 'undefined' && SETTINGS.calmFlash;
+      const f = slow ? 0.45 + 0.35 * Math.sin(this.t * 3) : (Math.sin(this.t * 14) > -0.2 ? 1 : 0.15);
+      this.mat.emissive.setRGB(1, 0.06, 0.08); this.mat.emissiveIntensity = f * 0.95;
+    }
     const def = POSES[this.pose] || POSES.stand, rig = this.rig;
     const want = moving && def.move ? 1 : 0;
     this.walkAmt = lerp(this.walkAmt, want, Math.min(1, dt * 10));
@@ -393,6 +425,7 @@ class Cham {
     this.shape = o.shape; this.size = o.size; this.pose = o.pose; this.yaw = o.yaw;
     this.ctx.drawImage(o.canvas, 0, 0); this.painted = true; this.tex.needsUpdate = true;
     this.mat.roughness = o.mat.roughness; this.mat.metalness = o.mat.metalness;
+    this.tilt = o.tilt; this.roll = o.roll; this.rollAxis.copy(o.rollAxis);
     this.rebuild(); this.root.position.copy(o.root.position); this.applyPose(true);
   }
   texURL() { return this.canvas.toDataURL('image/webp', 0.85); }

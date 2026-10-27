@@ -5,7 +5,7 @@ OUT="dist/peperhide"; STAGE="dist/stage"
 rm -rf dist && mkdir -p "$OUT" "$STAGE/server" "$STAGE/node_modules"
 cp -r node_modules/electron/dist/* "$OUT"/ && rm -f "$OUT/resources/default_app.asar"
 mv "$OUT/electron.exe" "$OUT/peperhide.exe"
-cp index.html servers.html style.css editor.css *.js icon.png icon.ico CREDITS.txt "$STAGE"/
+cp index.html servers.html style.css hud.css editor.css *.js icon.png icon.ico CREDITS.txt "$STAGE"/
 cp server/server.js server/public-worker.js "$STAGE/server/" && cp -r node_modules/ws "$STAGE/node_modules/"
 node -e "const p=require('./package.json'); delete p.devDependencies; delete p.scripts; require('fs').writeFileSync('$STAGE/package.json', JSON.stringify(p,null,2))"
 npx -y @electron/asar pack "$STAGE" "$OUT/resources/app.asar" && rm -rf "$STAGE"

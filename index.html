@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>peperhide</title>
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="hud.css">
 <link rel="stylesheet" href="editor.css">
 </head>
 <body class="in-menu">
@@ -203,6 +204,7 @@
     <div class="setbody">
       <div class="setpane" data-pane="gameplay">
         <div class="setrow"><div><b>Mouse sensitivity</b><small>Camera and aim speed</small></div><div class="ctl"><input id="setSens" type="range" min="0.2" max="3" step="0.05"><span id="setSensVal"></span></div></div>
+        <div class="setrow"><div><b>Calm buried warning</b><small>Pulse slowly instead of blinking when a hider is buried in an object</small></div><div class="ctl"><div class="seg" id="setCalm"><button data-v="off">Off</button><button data-v="on">On</button></div></div></div>
         <div class="setrow"><div><b>Invert Y axis</b><small>Flip vertical mouse look</small></div><div class="ctl"><div class="seg" id="setInvert"><button data-v="off">Off</button><button data-v="on">On</button></div></div></div>
         <div class="setrow"><div><b>Field of view</b><small>Wider shows more of the room</small></div><div class="ctl"><input id="setFov" type="range" min="55" max="100" step="1"><span id="setFovVal"></span></div></div>
       </div>
@@ -268,15 +270,23 @@
 <!-- ================= IN-ROUND HUD ================= -->
 <div id="hud" class="hidden">
   <div id="topcenter">
-    <div class="teams"><span class="team hiders" id="tHiders">0</span><div class="clock"><span id="phase">Hide</span><b id="timer">1:00</b></div><span class="team hunters" id="tHunters">0</span></div>
-    <div class="tbar"><i id="timerBar"></i></div>
+    <div class="matchbar">
+      <div class="side hiders"><i class="tico" data-ico="eye"></i><div><b id="tHiders">0</b><small>Hiding</small></div></div>
+      <div class="clock"><span id="phase">Hide</span><b id="timer">1:00</b><div class="tbar"><i id="timerBar"></i></div></div>
+      <div class="side hunters"><div><b id="tHunters">0</b><small>Hunters</small></div><i class="tico" data-ico="hammer"></i></div>
+    </div>
     <div id="sub"></div>
   </div>
+  <div id="edgeFlash"></div>
+  <div id="buriedWarn" class="hidden"><i class="wico">!</i><div><b>Your body is buried too much</b><span id="buriedTxt">Move out a little or hunters will see you flashing.</span></div><div class="bbar"><i id="buriedBar"></i></div></div>
+  <div id="pinged" class="hidden"><b>Pinged</b><span>A hunter's sonar made you chirp</span></div>
+  <div id="cues"></div>
   <div id="status"></div>
   <div id="feed"></div>
   <div id="eyes" class="hidden"><div class="eyeic" data-ico="eye"></div><div class="eyebody"><div class="eyes-label"><span>Hunter attention</span><b id="eyesTxt">Unseen</b></div><div class="bar"><i id="eyesBar"></i></div></div></div>
-  <div id="crosshair" class="hidden"></div>
-  <div id="hint"></div>
+  <div id="crosshair" class="hidden"><i class="hm" id="hitmark"></i></div>
+  <div id="tagPips" class="hidden"></div>
+  <div id="prompts"></div>
   <div id="stamina" class="hidden"><i></i></div>
   <div id="blind" class="hidden"><div><span class="eyebrow">Hunters wait</span><b>Eyes closed</b><span>The chameleons are hiding</span><em id="blindTime">60</em></div></div>
   <div id="abilities"></div>
@@ -308,10 +318,11 @@
 
 <!-- pose wheel -->
 <div id="poseWheel" class="hidden">
-  <div class="wheelcard glass">
-    <div class="whead"><h3>Poses</h3><span class="muted">Hold G, point at a pose and let go · or tap G and click · 1-0 quick poses</span></div>
-    <div id="wheelPoses" class="wheelgrid"></div>
-    <div id="wheelEmotes" class="emotes"><button data-emote="wave">Wave</button><button data-emote="dance">Dance</button><button data-emote="cheer">Cheer</button></div>
+  <div class="radial" id="radial">
+    <div class="rtabs" id="wheelTabs"></div>
+    <svg class="rsvg" id="wheelSvg" viewBox="-300 -300 600 600"></svg>
+    <div id="wheelRing"></div>
+    <div class="rcenter"><i class="pz" id="wheelBig"></i><b id="wheelName">Stand</b><small id="wheelHint">Point and release · click for next page</small></div>
   </div>
 </div>
 
@@ -372,6 +383,7 @@
 <script src="chars.js"></script>
 <script src="net.js"></script>
 <script src="game.js"></script>
+<script src="systems.js"></script>
 <script src="TransformControls.js"></script>
 <script src="mapedits.js"></script>
 <script src="editcore.js"></script>
