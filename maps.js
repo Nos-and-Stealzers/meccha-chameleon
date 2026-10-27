@@ -459,3 +459,101 @@ MAPS.gallery = {
 function f_gold() { return cm('#c9a54c', 0.4, 0.5); }
 
 const MAP_ORDER = ['mansion', 'backrooms', 'sewer', 'sugar', 'gallery'];
+
+/* ================= Lobby hub (not a playable round map) ================= */
+function signTex(title, sub, c1, c2, votes = 0, hot = false) {
+  const t = canvasTex(512, 320, (g, w, h) => {
+    const gr = g.createLinearGradient(0, 0, w, h); gr.addColorStop(0, c1); gr.addColorStop(1, c2);
+    g.fillStyle = '#12151d'; g.fillRect(0, 0, w, h);
+    g.fillStyle = gr; g.fillRect(14, 14, w - 28, h - 120);
+    g.fillStyle = 'rgba(255,255,255,.12)'; for (let i = -h; i < w; i += 34) { g.beginPath(); g.moveTo(i, 14); g.lineTo(i + 17, 14); g.lineTo(i + 17 - (h - 134), h - 106); g.lineTo(i - (h - 134), h - 106); g.fill(); }
+    g.fillStyle = 'rgba(10,12,18,.55)'; g.fillRect(14, h - 170, w - 28, 64);
+    g.fillStyle = '#fff'; g.font = '700 46px Segoe UI, system-ui, sans-serif'; g.textBaseline = 'middle'; g.fillText(title, 34, h - 138);
+    g.fillStyle = hot ? '#3ad49c' : '#c9d1e0'; g.font = '600 34px Segoe UI, system-ui, sans-serif';
+    g.fillText(votes ? `${votes} vote${votes === 1 ? '' : 's'}` : sub, 34, h - 55);
+  });
+  return t;
+}
+MAPS.lobby = {
+  id: 'lobby', name: 'Chameleon Club', desc: 'The lobby.', colors: ['#3ad49c', '#4da3ff'], hub: true,
+  bounds: { x0: 0, z0: 0, x1: 26, z1: 22 }, wallH: 5.5, ceilH: 5.5,
+  zones: [{ id: 'club', name: 'Club', x0: 0, z0: 0, x1: 26, z1: 22, pts: gridPts(1, 6, 21, 21, 4) }],
+  playerSpawn: [13, 15], hunterSpawns: [[13, 15]],
+  light: { hemi: 0.62, sky: 0xffffff, ground: 0x7a6f9a, amb: 0.16, sun: 0.35, sunPos: [-6, 30, 8], bg: 0x161a26 },
+  build() {
+    if (!TEX.hubFloor) {
+      TEX.hubFloor = canvasTex(256, 256, (g, w, h) => {
+        const cols = ['#2a3350', '#313b5c'];
+        for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) { g.fillStyle = cols[(x + y) % 2]; g.fillRect(x * 64, y * 64, 64, 64); }
+        g.strokeStyle = 'rgba(255,255,255,.06)'; g.lineWidth = 2; for (let i = 0; i <= 4; i++) { g.beginPath(); g.moveTo(i * 64, 0); g.lineTo(i * 64, h); g.moveTo(0, i * 64); g.lineTo(w, i * 64); g.stroke(); }
+      });
+      TEX.hubWall = canvasTex(256, 256, (g, w, h) => {
+        g.fillStyle = '#23283a'; g.fillRect(0, 0, w, h);
+        g.fillStyle = 'rgba(255,255,255,.035)'; for (let x = 0; x < w; x += 32) g.fillRect(x, 0, 16, h);
+        g.fillStyle = '#3ad49c'; g.fillRect(0, h * 0.78, w, 5); g.fillStyle = '#ff7ab3'; g.fillRect(0, h * 0.8, w, 3);
+      });
+      TEX.neon = canvasTex(1024, 192, (g, w, h) => {
+        g.fillStyle = '#0d1018'; g.fillRect(0, 0, w, h);
+        g.font = '800 120px Segoe UI, system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+        g.shadowColor = '#3ad49c'; g.shadowBlur = 30; g.fillStyle = '#b9ffe6'; g.fillText('MECCHA CLUB', w / 2, h / 2 + 6);
+      });
+    }
+    const extra = buildShell([{ id: 'club', x0: 0, z0: 0, x1: 26, z1: 22, wall: 'hubWall', floor: 'hubFloor', floorScale: 4 }], [], { frame: false });
+    plane(13, 5.5, 11, 26, 22, cm('#151926', 1), Math.PI / 2, 0).castShadow = false;
+    const H = (this.hub = { votePads: [], jumpPads: [], signs: {} });
+    const glow = (x, z, r, color, y = 0.012) => {
+      const m = new THREE.Mesh(new THREE.CircleGeometry(r, 48), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85 }));
+      m.rotation.x = -Math.PI / 2; m.position.set(x, y, z); mapGroup.add(m);
+      const ring = new THREE.Mesh(new THREE.RingGeometry(r, r + 0.08, 48), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+      ring.rotation.x = -Math.PI / 2; ring.position.set(x, y + 0.002, z); mapGroup.add(ring);
+      return m;
+    };
+    // ready pad
+    H.readyPad = { x: 13, z: 10.5, r: 1.5, mesh: glow(13, 10.5, 1.5, 0x1f8f66) };
+    { const s = canvasTex(256, 64, (g, w, h) => { g.fillStyle = '#fff'; g.font = '800 40px Segoe UI, system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('READY UP', w / 2, h / 2); }); const p = new THREE.Mesh(new THREE.PlaneGeometry(2, 0.5), new THREE.MeshBasicMaterial({ map: s, transparent: true })); p.rotation.set(-Math.PI / 2, 0, 0); p.position.set(13, 0.02, 12.4); mapGroup.add(p); }
+    // vote pads + signs
+    MAP_ORDER.forEach((id, i) => {
+      const m = MAPS[id], x = 3.6 + i * 4.7, z = 4.2;
+      H.votePads.push({ id, x, z, r: 1.15, mesh: glow(x, z, 1.15, new THREE.Color(m.colors[1]).multiplyScalar(0.7).getHex()) });
+      box(x - 1.2, 1.6, 0.1, 0.1, 2.2, f_steel(), { collide: false }); box(x + 1.2, 1.6, 0.1, 0.1, 2.2, f_steel(), { collide: false });
+      const tex = signTex(m.name, 'Step here to vote', m.colors[0], m.colors[1]);
+      const sign = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 1.625), new THREE.MeshBasicMaterial({ map: tex }));
+      sign.position.set(x, 3.0, 1.62); mapGroup.add(sign);
+      box(x, 1.58, 2.75, 0.06, 1.75, cm('#0d1018', 0.5), { y: 2.12, collide: false });
+      H.signs[id] = sign;
+    });
+    H.setVotes = (counts, mine) => {
+      for (const id of MAP_ORDER) {
+        const m = MAPS[id], s = H.signs[id];
+        s.material.map.dispose(); s.material.map = signTex(m.name, 'Step here to vote', m.colors[0], m.colors[1], counts[id] || 0, mine === id); s.material.needsUpdate = true;
+      }
+    };
+    // neon sign
+    { const p = new THREE.Mesh(new THREE.PlaneGeometry(7, 1.31), new THREE.MeshBasicMaterial({ map: TEX.neon })); p.position.set(13, 4.75, 0.12); mapGroup.add(p); }
+    // camo practice wall (west) + tester
+    const swatchTex = ['wallLiving', 'brick', 'brWall', 'sewerWall', 'swirl', 'frostMint', 'graffiti', 'books', 'wallPlay'];
+    swatchTex.forEach((k, i) => decal(0.11, 1.75, 6.5 + i * 1.6, 1.6, 3.4, Array.isArray(TEX[k]) ? TEX[k][0] : TEX[k], 'e', 0.9));
+    box(0.35, 13.7, 0.5, 15, 0.12, cm('#0d1018', 0.6), { y: 3.45, collide: false });
+    H.dummy = { x: 6.2, z: 13.7, yaw: -Math.PI / 2 };
+    cyl(6.2, 13.7, 0.55, 0.6, 0.18, cm('#0d1018', 0.4), { collide: true, top: true });
+    // mezzanine + stairs + jump pads (east)
+    box(23.75, 11, 4.5, 11, 0.25, cm('#2d3550', 0.7), { y: 2.0, top: true });
+    for (let z = 5.6; z <= 16.4; z += 1.8) box(21.55, z, 0.06, 0.06, 1, f_steel(), { y: 2.25, collide: false });
+    box(21.55, 11, 0.06, 10.8, 0.06, cm('#3ad49c', 0.4), { y: 3.2, collide: false });
+    addCollider(21.5, 2.25, 5.5, 21.6, 3.2, 16.5);
+    for (let i = 0; i < 7; i++) box(23.75, 21.6 - i * 0.55, 4.5, 0.55, 0.3 * (i + 1), cm(i % 2 ? '#313b5c' : '#2a3350', 0.8), { top: true });
+    for (const z of [8.5, 13.5]) { H.jumpPads.push({ x: 19.6, z, r: 0.75 }); glow(19.6, z, 0.75, 0xff8a3d, 0.015); }
+    // podium (south)
+    for (const [x, h, c] of [[13, 0.9, '#ffd43b'], [11.4, 0.6, '#c9d1e0'], [14.6, 0.4, '#e8a87c']]) box(x, 20, 1.6, 1.6, h, cm(c, 0.5, 0.2), { top: true });
+    // lounge (south-west) + arcade cabinets
+    box(3.5, 20.6, 4, 1, 0.45, cm('#ff7ab3', 0.9), { top: true }); box(3.5, 21.3, 4, 0.3, 0.95, cm('#e0609a', 0.9));
+    box(3.5, 18.6, 1.6, 0.9, 0.42, cm('#2d3550', 0.6), { top: true });
+    for (const x of [8, 9.2]) { box(x, 21.3, 1, 0.8, 1.9, cm('#4da3ff', 0.5)); const scr = new THREE.Mesh(new THREE.PlaneGeometry(0.75, 0.55), new THREE.MeshBasicMaterial({ color: x > 8.5 ? 0xff7ab3 : 0x3ad49c })); scr.position.set(x, 1.45, 20.89); scr.rotation.y = Math.PI; mapGroup.add(scr); }
+    // paint buckets
+    ['#ff5d6c', '#ffd43b', '#3ad49c', '#4da3ff', '#b197fc'].forEach((c, i) => { cyl(16.5 + i * 0.75, 20.9, 0.3, 0.26, 0.5, cm('#d8dde6', 0.4, 0.5), { collide: true, top: true }); cyl(16.5 + i * 0.75, 20.9, 0.27, 0.27, 0.02, cm(c, 0.3), { y: 0.5, collide: false }); });
+    plant(1, 1); plant(25, 1); plant(1, 21); plant(20.5, 1.2);
+    for (const [x, z] of [[6, 6], [13, 6], [20, 6], [6, 15], [13, 15], [18, 18]]) lamp(x, z, 0xfff3e0, 0.5, { dist: 12 });
+    lamp(13, 10.5, 0x3ad49c, 0.6, { dist: 6, y: 2.5, fixture: false });
+    return extra;
+  },
+};

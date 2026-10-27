@@ -1,5 +1,6 @@
 'use strict';
-/* Meccha Chameleon: game logic (sessions, actors, AI, sync), input, painting, HUD. */
+/* Meccha Chameleon: simulation. Sound, AI camouflage, hunters, sessions (solo / party / online), abilities,
+   the walkable lobby hub, network sync, effects, input and the main loop. UI lives in ui.js. */
 
 /* ================= sound ================= */
 const Sound = (() => {
@@ -40,18 +41,27 @@ const Sound = (() => {
       else { l.setPosition(p.x, p.y, p.z); l.setOrientation(f.x, f.y, f.z, u.x, u.y, u.z); }
     },
     whistle(pos) { if (!ok()) return; const t = ac.currentTime, d = out(pos); osc('sine', 1250, 2100, t, 0.2, 0.32, d); osc('sine', 2100, 1150, t + 0.22, 0.32, 0.32, d); },
+    chirp(pos) { if (!ok()) return; const t = ac.currentTime, d = out(pos); osc('sine', 2600, 3400, t, 0.07, 0.22, d); osc('sine', 2800, 3600, t + 0.1, 0.07, 0.2, d); },
+    ping(pos) { if (!ok()) return; const t = ac.currentTime, d = out(pos); osc('sine', 1400, 380, t, 0.55, 0.28, d); osc('sine', 1400, 380, t + 0.18, 0.5, 0.1, d); },
     bonk(pos) { if (!ok()) return; const t = ac.currentTime, d = out(pos); osc('triangle', 240, 70, t, 0.25, 0.5, d); noise(t, 0.1, 0.5, 900, d); },
     thud() { if (!ok()) return; osc('sine', 140, 60, ac.currentTime, 0.12, 0.25, master); },
     swoosh(pos) { if (!ok()) return; noise(ac.currentTime, 0.18, 0.25, 600, out(pos)); },
+    shoot() { if (!ok()) return; const t = ac.currentTime; noise(t, 0.08, 0.35, 1400, master); osc('square', 320, 120, t, 0.09, 0.08, master); },
+    splatHit(pos) { if (!ok()) return; const t = ac.currentTime, d = out(pos); noise(t, 0.16, 0.6, 500, d); osc('sine', 180, 90, t, 0.12, 0.2, d); },
     pop(pos) { if (!ok()) return; const t = ac.currentTime, d = out(pos); noise(t, 0.35, 0.7, 1800, d); osc('sine', 500, 1500, t, 0.18, 0.3, d); },
     horn() { if (!ok()) return; const t = ac.currentTime; [196, 247, 294].forEach((f, i) => osc('sawtooth', f, f, t + i * 0.03, 0.7, 0.09, master)); },
     tick() { if (!ok()) return; osc('square', 1100, null, ac.currentTime, 0.04, 0.05, master); },
     click() { if (!ok()) return; osc('sine', 720, null, ac.currentTime, 0.05, 0.08, master); },
+    hover() { if (!ok()) return; osc('sine', 1200, null, ac.currentTime, 0.025, 0.03, master); },
     splat() { if (!ok()) return; noise(ac.currentTime, 0.05, 0.12, 2800, master); },
+    jump() { if (!ok()) return; osc('sine', 280, 620, ac.currentTime, 0.14, 0.12, master); },
+    boing() { if (!ok()) return; osc('triangle', 180, 900, ac.currentTime, 0.35, 0.22, master); },
+    ready(on) { if (!ok()) return; const t = ac.currentTime; (on ? [660, 990] : [660, 440]).forEach((f, i) => osc('triangle', f, null, t + i * 0.08, 0.14, 0.14, master)); },
     alert(pos) { if (!ok()) return; osc('square', 700, 1400, ac.currentTime, 0.14, 0.12, out(pos)); },
     chat() { if (!ok()) return; osc('sine', 880, 1320, ac.currentTime, 0.08, 0.08, master); },
     win() { if (!ok()) return; const t = ac.currentTime; [523, 659, 784, 1047].forEach((f, i) => osc('triangle', f, null, t + i * 0.12, 0.3, 0.2, master)); },
     lose() { if (!ok()) return; const t = ac.currentTime; [392, 330, 262].forEach((f, i) => osc('triangle', f, null, t + i * 0.16, 0.35, 0.2, master)); },
+    levelup() { if (!ok()) return; const t = ac.currentTime; [523, 659, 784, 1047, 1319].forEach((f, i) => osc('sine', f, null, t + i * 0.07, 0.4, 0.16, master)); },
   };
 })();
 
@@ -67,12 +77,12 @@ function textSprite(text, bg = '#3ad49c', fg = '#06261a', scale = 0.55) {
   return s;
 }
 
-/* ================= AI camouflage & spots ================= */
+/* ================= AI camouflage & hiding spots ================= */
 const rcBody = new THREE.Raycaster();
 const SKILLS = {
-  sloppy: { grid: [16, 22], dot: 7.5, noise: 30, vps: 1, miss: 0.75 },
-  medium: { grid: [30, 42], dot: 4.4, noise: 14, vps: 2, miss: 0.2 },
-  good: { grid: [42, 58], dot: 3.3, noise: 6, vps: 3, miss: 0 },
+  sloppy: { grid: [18, 26], dot: 7.5, noise: 30, vps: 1, miss: 0.75 },
+  medium: { grid: [30, 44], dot: 4.4, noise: 14, vps: 2, miss: 0.2 },
+  good: { grid: [42, 60], dot: 3.3, noise: 6, vps: 3, miss: 0 },
 };
 function ndcRect(bb, cam) {
   let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
@@ -86,6 +96,18 @@ function ndcRect(bb, cam) {
   }
   return { x0, y0, x1, y1 };
 }
+/* Renders a body with its UVs encoded as colour (12 bits per axis) so autoCamo can read UVs per pixel. */
+const UVPASS = (() => {
+  const mat = new THREE.ShaderMaterial({
+    vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: 'varying vec2 vUv; void main(){ vec2 q = floor(clamp(vUv, 0.0, 1.0) * 4095.0 + 0.5); float uh = floor(q.x / 16.0), ul = q.x - uh * 16.0, vh = floor(q.y / 16.0), vl = q.y - vh * 16.0; gl_FragColor = vec4(uh / 255.0, (ul * 16.0 + vl) / 255.0, vh / 255.0, 1.0); }',
+    side: THREE.DoubleSide,
+  });
+  const sc = new THREE.Scene(), mesh = new THREE.Mesh(new THREE.BufferGeometry(), mat);
+  mesh.matrixAutoUpdate = false; mesh.frustumCulled = false; sc.add(mesh);
+  const rts = {};
+  return { scene: sc, mesh, target(w, h) { const k = w + 'x' + h; return rts[k] || (rts[k] = new THREE.WebGLRenderTarget(w, h, { minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter })); } };
+})();
 function autoCamo(ch, skillKey) {
   const S = SKILLS[skillKey] || SKILLS.medium;
   ch.root.updateMatrixWorld(true);
@@ -107,32 +129,48 @@ function autoCamo(ch, skillKey) {
   for (const d of dirs) { if (chosen.every((o) => Math.abs(angDiff(o.a, d.a)) > 0.75)) chosen.push(d); if (chosen.length >= S.vps) break; }
   chosen.reverse();
   const vc = new THREE.PerspectiveCamera(50, 1, 0.05, 60), ndc = new THREE.Vector2();
+  const size = bb.getSize(new V3()), tpm = RIG.texelsPerUnit / (CHAM_H * SIZES[ch.size][0]);
+  const maxDim = Math.max(size.x, size.y, size.z);
+  UVPASS.mesh.geometry = ch.mesh.geometry; UVPASS.mesh.matrix.copy(ch.mesh.matrixWorld);
   for (const vp of chosen) {
-    const low = ch.pose === 'lie' || ch.pose === 'curl';
+    const low = size.y < 0.8;
     const V = c.clone().addScaledVector(vp.d, Math.max(1.5, Math.min(vp.free - 0.4, low ? 3 : 4.5)));
     V.y = Math.max(1.6, c.y + 0.6);
-    vc.position.copy(V); vc.lookAt(c); vc.updateMatrixWorld(); vc.updateProjectionMatrix();
+    vc.position.copy(V); vc.lookAt(c); vc.updateMatrixWorld(); vc.clearViewOffset(); vc.updateProjectionMatrix();
     const r = ndcRect(bb, vc); if (!r) continue;
     const [gx, gy] = S.grid;
-    for (let i = 0; i < gx; i++) for (let j = 0; j < gy; j++) {
+    const cell = maxDim / Math.min(gx, gy);
+    const dot = Math.max(S.dot, cell * tpm * 0.75 / PSCALE);
+    // GPU pass: which body UV is under each grid cell from this viewpoint
+    const FW = gx * 2 / (r.x1 - r.x0), FH = gy * 2 / (r.y1 - r.y0);
+    vc.setViewOffset(FW, FH, (r.x0 + 1) / 2 * FW, (1 - r.y1) / 2 * FH, gx, gy);
+    const rt = UVPASS.target(gx, gy), buf = new Uint8Array(gx * gy * 4);
+    renderer.setRenderTarget(rt); renderer.setClearColor(0, 0); renderer.clear(); renderer.render(UVPASS.scene, vc);
+    renderer.readRenderTargetPixels(rt, 0, 0, gx, gy, buf); renderer.setRenderTarget(null); renderer.setClearColor(scene.background || 0x000000, 1);
+    vc.clearViewOffset(); vc.updateProjectionMatrix();
+    const minD = V.distanceTo(c) - maxDim * 0.6, uv = new THREE.Vector2();
+    for (let j = 0; j < gy; j++) for (let i = 0; i < gx; i++) {
+      const k = (j * gx + i) * 4; if (buf[k + 3] < 200) continue;
+      uv.set((buf[k] * 16 + (buf[k + 1] >> 4)) / 4095, (buf[k + 2] * 16 + (buf[k + 1] & 15)) / 4095);
       ndc.set(lerp(r.x0, r.x1, (i + 0.5) / gx), lerp(r.y0, r.y1, (j + 0.5) / gy));
-      rcBody.setFromCamera(ndc, vc); rcBody.far = 80;
-      const h1 = rcBody.intersectObject(ch.mesh, false)[0]; if (!h1) continue;
-      const h2 = envHit(h1.point.clone().addScaledVector(rcBody.ray.direction, 0.01), rcBody.ray.direction, 10, near); if (!h2) continue;
+      rcBody.setFromCamera(ndc, vc); rcBody.far = 70;
+      const hits = rcBody.intersectObjects(near, false);
+      const h2 = hits.find((h) => h.distance > minD); if (!h2) continue;
       const col = surfaceColor(h2), nz = S.noise;
-      ch.paintDot(h1.uv, [col[0] + rand(-nz, nz), col[1] + rand(-nz, nz), col[2] + rand(-nz, nz)], S.dot);
+      ch.paintDot(uv, [col[0] + rand(-nz, nz), col[1] + rand(-nz, nz), col[2] + rand(-nz, nz)], dot);
       if (vp === chosen[chosen.length - 1] && i === gx >> 1 && j === gy >> 1) rough = h2.object.material.roughness ?? 0.85;
     }
   }
   if (Math.random() < S.miss) {
-    const g = ch.ctx; g.fillStyle = '#f2f2ee';
-    g.beginPath(); g.ellipse(rand(0.1, 0.9) * TS, (1 - rand(0.45, 0.9)) * TS, rand(8, 14), rand(10, 18), rand(0, 3), 0, 7); g.fill();
+    const g = ch.ctx; g.fillStyle = WHITE;
+    g.beginPath(); g.ellipse(rand(0.1, 0.9) * TS, rand(0.1, 0.9) * TS, rand(16, 30), rand(20, 36), rand(0, 3), 0, 7); g.fill();
   }
   ch.mat.roughness = rough;
   ch.flush(); ch.tex.needsUpdate = true;
 }
 function snapToWall(P, maxDist = 1.4) {
-  const c = P.center(); let best = null;
+  const c = P.root.position.clone(); c.y += 0.6;
+  let best = null;
   for (let i = 0; i < 16; i++) {
     const a = i / 16 * Math.PI * 2, h = envHit(c, new V3(Math.sin(a), 0, Math.cos(a)), maxDist);
     if (h && h.face && (!best || h.distance < best.distance)) best = h;
@@ -140,33 +178,36 @@ function snapToWall(P, maxDist = 1.4) {
   if (!best) return false;
   const n = best.face.normal.clone().transformDirection(best.object.matrixWorld); n.y = 0;
   if (n.lengthSq() < 0.1) return false; n.normalize();
-  const depth = (GEO_BB[P.shape].max.z - GEO_BB[P.shape].min.z) / 2 * POSES.flat.sz * SIZES[P.size][0];
+  const depth = P.halfDepth();
   P.root.position.x = best.point.x + n.x * (depth + 0.02);
   P.root.position.z = best.point.z + n.z * (depth + 0.02);
   P.setYaw(Math.atan2(n.x, n.z));
   return true;
 }
+const FLOOR_POSES = ['lie', 'prone', 'side', 'curl', 'crouch', 'kneel', 'curl'];
 function findSpot(ch, taken) {
   const zones = ZONES.filter((z) => !z.hunters), hs = MAP.hunterSpawns;
   for (let tries = 0; tries < 500; tries++) {
     const zn = pick(zones), roll = Math.random();
     let s = null;
-    if (roll < 0.55) {
+    if (roll < 0.5) {
       const x = rand(zn.x0 + 0.5, zn.x1 - 0.5), z = rand(zn.z0 + 0.5, zn.z1 - 0.5);
       if (!freeAt(x, z, 0.3, 1.5)) continue;
-      ch.root.position.set(x, 0, z); ch.setPose('flat');
+      const pose = Math.random() < 0.3 ? 'star' : 'flat';
+      ch.root.position.set(x, 0, z); ch.setPose(pose, true);
       if (!snapToWall(ch, 2.5)) continue;
-      s = { x: ch.root.position.x, y: 0, z: ch.root.position.z, yaw: ch.yaw, pose: 'flat' };
-      if (!freeAt(s.x, s.z, 0.16, 1.4)) continue;
-    } else if (roll < 0.8) {
+      s = { x: ch.root.position.x, y: 0, z: ch.root.position.z, yaw: ch.yaw, pose };
+      if (!freeAt(s.x, s.z, 0.14, 1.4)) continue;
+      if (pose === 'star') { const sd = new V3(Math.cos(s.yaw), 0, -Math.sin(s.yaw)); if (!freeAt(s.x + sd.x * 0.45, s.z + sd.z * 0.45, 0.1, 1.3) || !freeAt(s.x - sd.x * 0.45, s.z - sd.z * 0.45, 0.1, 1.3)) continue; }
+    } else if (roll < 0.78) {
       const ts = tops.filter((t) => t.zone === zn.id && t.w > 0.7 && t.d > 0.5);
       if (!ts.length) continue;
       const t = pick(ts), long = Math.max(t.w, t.d) > 1.6;
-      s = { x: t.x + rand(-1, 1) * Math.max(0, t.w / 2 - (long && t.w > t.d ? 0.8 : 0.4)), y: t.y, z: t.z + rand(-1, 1) * Math.max(0, t.d / 2 - (long && t.d >= t.w ? 0.8 : 0.35)), yaw: long ? (t.w > t.d ? Math.PI / 2 : 0) + (Math.random() < 0.5 ? Math.PI : 0) : rand(0, 6.28), pose: long ? 'lie' : 'curl' };
+      s = { x: t.x + rand(-1, 1) * Math.max(0, t.w / 2 - (long && t.w > t.d ? 0.8 : 0.4)), y: t.y, z: t.z + rand(-1, 1) * Math.max(0, t.d / 2 - (long && t.d >= t.w ? 0.8 : 0.35)), yaw: long ? (t.w > t.d ? Math.PI / 2 : 0) + (Math.random() < 0.5 ? Math.PI : 0) : rand(0, 6.28), pose: long ? pick(['lie', 'prone', 'side']) : pick(['curl', 'sit', 'thinker', 'curl']) };
       if (!freeAt(s.x, s.z, 0.3, 0.9, t.y + 0.01)) continue;
     } else if (roll < 0.93) {
-      s = { x: rand(zn.x0 + 0.9, zn.x1 - 0.9), y: 0, z: rand(zn.z0 + 0.9, zn.z1 - 0.9), yaw: rand(0, 6.28), pose: 'lie' };
-      if (!freeAt(s.x, s.z, 0.6, 1.2)) continue;
+      s = { x: rand(zn.x0 + 0.9, zn.x1 - 0.9), y: 0, z: rand(zn.z0 + 0.9, zn.z1 - 0.9), yaw: rand(0, 6.28), pose: pick(FLOOR_POSES) };
+      if (!freeAt(s.x, s.z, 0.65, 1.2)) continue;
     } else {
       const sp = (MAP.specials || []).filter((p) => p.zone === zn.id);
       if (!sp.length) continue;
@@ -188,36 +229,38 @@ const visCam = new THREE.PerspectiveCamera(78, VW / VH, 0.1, 30);
 const bufA = new Uint8Array(VW * VH * 4), bufB = new Uint8Array(VW * VH * 4);
 
 class Hunter {
-  constructor({ id, name, avatar, ai = false, local = false, x = 0, z = 0 }) {
+  constructor({ id, name, avatar, ai = false, local = false, x = 0, z = 0, y = 0 }) {
     this.id = id; this.name = name; this.avatar = avatar; this.ai = ai; this.local = local; this.color = avatar.color;
-    this.pos = new V3(x, 0, z); this.yaw = 0; this.look = 0; this.pitch = -0.15;
+    this.pos = new V3(x, y, z); this.yaw = 0; this.look = 0; this.pitch = -0.15;
     this.state = 'wait'; this.path = []; this.sus = new Map(); this.focus = null;
-    this.lookT = 0.12 + Math.random() * 0.2; this.scanT = 0; this.stuckT = 0; this.repathT = 0; this.swing = 0; this.confused = 0; this.t = Math.random() * 10; this.markT = 0;
+    this.lookT = 0.12 + Math.random() * 0.2; this.scanT = 0; this.stuckT = 0; this.repathT = 0; this.swing = 0; this.confused = 0; this.t = Math.random() * 10; this.markT = 0; this.pingCD = rand(12, 25);
     this.body = { pos: this.pos, r: 0.3, h: 1.8, vy: 0 };
-    this.visited = {}; this.target = null;
-    const { group, tool } = buildHunterModel(avatar);
-    this.group = group; this.tool = tool;
-    this.mark = textSprite('?', '#ffcc4d', '#2b2000', 0.5); this.mark.position.y = 2.35; this.mark.visible = false; group.add(this.mark);
-    this.markBang = textSprite('!', '#ff5d6c', '#ffffff', 0.55); this.markBang.position.y = 2.35; this.markBang.visible = false; group.add(this.markBang);
-    this.nameTag = textSprite(name, 'rgba(15,18,26,.75)', '#ffffff', 0.26); this.nameTag.position.y = 2.05; this.nameTag.visible = !ai; group.add(this.nameTag);
-    scene.add(group); this.sync();
+    this.visited = {}; this.target = null; this.spd = 0; this.animLast = this.pos.clone();
+    this.model = buildHunterModel(avatar);
+    this.group = this.model.group; this.tool = this.model.tool;
+    this.mark = textSprite('?', '#ffcc4d', '#2b2000', 0.5); this.mark.position.y = 2.35; this.mark.visible = false; this.group.add(this.mark);
+    this.markBang = textSprite('!', '#ff5d6c', '#ffffff', 0.55); this.markBang.position.y = 2.35; this.markBang.visible = false; this.group.add(this.markBang);
+    this.nameTag = textSprite(name, 'rgba(15,18,26,.75)', '#ffffff', 0.26); this.nameTag.position.y = 2.08; this.nameTag.visible = !ai; this.group.add(this.nameTag);
+    scene.add(this.group); this.sync();
   }
   sync() { this.group.position.copy(this.pos); this.group.rotation.y = this.yaw; }
-  dispose() { scene.remove(this.group); }
+  dispose() { scene.remove(this.group); this.model.mat.dispose(); this.model.rig.dispose(); }
   eye() { return new V3(this.pos.x, this.pos.y + 1.55, this.pos.z); }
   doSwing() { this.swing = 0.35; }
   animTool(dt) {
-    if (this.swing > 0) { this.swing -= dt; this.tool.rotation.x = 0.3 - Math.sin((1 - this.swing / 0.35) * Math.PI) * 1.8; }
-    else this.tool.rotation.x = 0.3;
+    if (this.swing > 0) this.swing -= dt;
     if (this.markT > 0) this.markT -= dt;
+    const d = Math.hypot(this.pos.x - this.animLast.x, this.pos.z - this.animLast.z) / Math.max(dt, 1e-4);
+    this.spd = lerp(this.spd, Math.min(d, 8), Math.min(1, dt * 8)); this.animLast.copy(this.pos);
+    if (this.group.visible) this.model.anim(dt, this.spd, Math.max(0, this.swing));
   }
   puppet(dt) {
-    this.animTool(dt);
     if (this.target) {
       const k = Math.min(1, dt * 12);
       this.pos.x = lerp(this.pos.x, this.target.x, k); this.pos.z = lerp(this.pos.z, this.target.z, k); this.pos.y = lerp(this.pos.y, this.target.y || 0, k);
       this.yaw += angDiff(this.yaw, this.target.yaw) * k;
     }
+    this.animTool(dt);
     if (this.ai) { this.mark.visible = this.state === 'investigate' || this.markT > 0; this.markBang.visible = this.state === 'chase'; }
     this.sync();
   }
@@ -250,6 +293,7 @@ class Hunter {
     this.animTool(dt);
     if (this.state === 'wait') { this.look = this.yaw; this.sync(); return; }
     if (this.confused > 0) { this.confused -= dt; this.look = this.yaw + Math.sin(this.t * 7) * 0.8; this.sync(); return; }
+    this.pingCD -= dt;
     this.lookT -= dt;
     if (this.lookT <= 0) { const dtLook = 0.25 - this.lookT; this.lookT = 0.25; this.perceive(targets, dtLook); }
     for (const t of targets) {
@@ -281,6 +325,7 @@ class Hunter {
       this.look = this.yaw + Math.sin(this.t * 1.3 + this.id.length) * 0.6; this.pitch = -0.18 + Math.sin(this.t * 0.8) * 0.12;
     } else if (this.state === 'scan') {
       this.scanT -= dt; this.look = this.yaw + Math.sin(this.t * 1.7) * 1.2; this.pitch = -0.25 + Math.sin(this.t * 1.1) * 0.2;
+      if (this.pingCD <= 0 && G.phase === 'hunt') { this.pingCD = rand(26, 40); G.emit({ e: 'ping', id: this.id, x: this.pos.x, y: this.pos.y, z: this.pos.z }); }
       if (this.scanT <= 0) this.pickGoal();
     }
     if (this.state === 'patrol' || this.state === 'chase') {
@@ -302,6 +347,7 @@ class Hunter {
     this.pitch = lerp(this.pitch, Math.atan2(p.y - (this.pos.y + 1.55), Math.hypot(dx, dz)), Math.min(1, dt * 5));
     if (this.state !== 'patrol') this.yaw += angDiff(this.yaw, want) * Math.min(1, dt * 4);
   }
+  /** Fair vision: render the view with and without hiders, suspicion = colour difference inside each target. */
   perceive(targets, dt) {
     visCam.position.copy(this.eye()); visCam.rotation.set(this.pitch, this.look + Math.PI, 0, 'YXZ'); visCam.updateMatrixWorld();
     const cand = [];
@@ -311,14 +357,15 @@ class Hunter {
       if (!r || r.x1 < -1 || r.x0 > 1 || r.y1 < -1 || r.y0 > 1) continue;
       cand.push([t, r]);
     }
-    const seen = new Set();
+    const seen = new Set(), gains = new Map();
     if (cand.length) {
       const hiddenH = []; for (const h of G.hunters) if (h.group.visible) { h.group.visible = false; hiddenH.push(h); }
+      const fxHidden = []; for (const s of G.fxHide) if (s.visible) { s.visible = false; fxHidden.push(s); }
       renderer.setRenderTarget(visRT);
       renderer.render(scene, visCam); renderer.readRenderTargetPixels(visRT, 0, 0, VW, VH, bufA);
       const hid = []; for (const c of G.hiders) if (c.root.visible) { c.root.visible = false; hid.push(c); }
       renderer.render(scene, visCam); renderer.readRenderTargetPixels(visRT, 0, 0, VW, VH, bufB);
-      for (const c of hid) c.root.visible = true; for (const h of hiddenH) h.group.visible = true;
+      for (const c of hid) c.root.visible = true; for (const h of hiddenH) h.group.visible = true; for (const s of fxHidden) s.visible = true;
       renderer.setRenderTarget(null);
       const D = G.D;
       for (const [t, r] of cand) {
@@ -336,10 +383,12 @@ class Hunter {
         seen.add(t);
         let gain = s * D.K * dt;
         if (t.speed > 0.4) gain += D.motion * dt * Math.min(1, vis / 30);
+        gains.set(t, gain);
         this.sus.set(t, (this.sus.get(t) || 0) + gain);
       }
     }
     for (const [t, v] of this.sus) if (!seen.has(t)) this.sus.set(t, Math.max(0, v - 0.1 * dt));
+    return gains;
   }
 }
 
@@ -349,16 +398,19 @@ const DIFF = {
   normal: { name: 'Normal', hunters: 2, K: 1 / 60, motion: 1.8, huntSpeed: 2.7, prep: 60, hunt: 180, aiHiders: 3, seekSkill: 'medium', seekCount: 5, seekTime: 240, hiderSkill: 'medium' },
   hard: { name: 'Hard', hunters: 3, K: 1 / 36, motion: 2.8, huntSpeed: 3.0, prep: 50, hunt: 180, aiHiders: 4, seekSkill: 'good', seekCount: 6, seekTime: 240, hiderSkill: 'good' },
 };
+const AB = { clones: 2, decoys: 2, tauntCD: 6, pingCD: 22, ammo: 3, ammoRecharge: 9 };
+const PAINTBALL = '#ff2bd6';
 
 const G = {
-  phase: 'menu', t: 0, timer: 0, D: DIFF.normal, P: null,
+  phase: 'boot', t: 0, timer: 0, D: DIFF.normal, P: null,
   online: false, isHost: true, myId: 'me',
-  hiders: [], hunters: [], my: null, myHunter: null, fp: null,
+  hiders: [], hunters: [], my: null, myHunter: null, fp: null, fxHide: [],
   view: 'third', paint: false, paused: false,
   ctrl: { yaw: 0, pitch: 0.35, dist: 3.4 }, paintCam: { yaw: 0, pitch: 0.2, dist: 2.6 },
-  stats: {}, tauntT: 0, forcedT: 0, cloneLeft: 2, ink: 100, specIdx: 0, fx: [], labels: [],
+  stats: {}, ab: {}, specIdx: 0, fx: [], labels: [], balls: [], splats: [], rings: [], bubbles: [],
   solo: { kind: 'hide', map: 'mansion', diff: 'normal' }, party: null,
   lobby: { players: new Map(), settings: { map: 'mansion', mode: 'classic', hunters: 1, aiHunters: 1, aiHiders: 2, prep: 60, hunt: 180, diff: 'normal' }, chat: [], inGame: false },
+  hub: null, ink: 100,
   sendT: 0, texT: 0, aiSendT: 0, timerSendT: 0,
 
   findCham(id) { return this.hiders.find((c) => c.id === id); },
@@ -367,52 +419,62 @@ const G = {
   realHiders() { return this.hiders.filter((c) => !c.isClone); },
 
   clearRound() {
+    clearHub();
     for (const c of this.hiders) c.dispose();
     for (const h of this.hunters) h.dispose();
     for (const f of this.fx) scene.remove(f.m);
     for (const l of this.labels) scene.remove(l.s);
-    this.hiders = []; this.hunters = []; this.fx = []; this.labels = []; this.my = null; this.myHunter = null; this.fp = null;
-    this.paint = false; this.cloneLeft = 2; this.ink = 100; this.reveal = null; this.revealList = null; this.playerSus = 0;
-    this.stats = { taunts: 0, clonesFooled: 0, maxSus: 0, start: 0 };
+    for (const b of this.balls) scene.remove(b.m);
+    for (const s of this.splats) { scene.remove(s); s.material.dispose(); }
+    for (const r of this.rings) scene.remove(r.m);
+    for (const b of this.bubbles) b.s.parent?.remove(b.s);
+    this.hiders = []; this.hunters = []; this.fx = []; this.labels = []; this.balls = []; this.splats = []; this.rings = []; this.bubbles = []; this.fxHide = [];
+    this.my = null; this.myHunter = null; this.fp = null;
+    this.paint = false; this.ink = 100; this.reveal = null; this.revealList = null; this.playerSus = 0;
+    this.ab = { clones: AB.clones, decoys: AB.decoys, taunt: 0, ping: 0, ammo: AB.ammo, ammoT: 0 };
+    this.stats = { taunts: 0, clonesFooled: 0, maxSus: 0, start: 0, finds: 0, splats: 0 };
     if (MAP) setGate(true);
-    UI.paintPanel(false); toolVM.visible = false; UI.blind(false);
+    UI.paintPanel(false); toolVM.visible = false; UI.blind(false); UI.wheel(false);
   },
 
   /* ---------- round setup (shared by solo, party and online) ---------- */
   async buildPayload(players, cfg) {
+    this.phase = 'loading'; UI.hubHud(false); UI.wheel(false);
     UI.loading(true, 'Loading ' + (MAPS[cfg.map]?.name || 'map') + '…');
     await nextFrame();
+    clearHub(); disposeMenuDoll();
     if (!MAP || MAP.id !== cfg.map) loadMap(cfg.map);
     await nextFrame();
     const D = DIFF[cfg.diff] || DIFF.normal;
     const aiHiders = [], taken = [{ x: MAP.playerSpawn[0], z: MAP.playerSpawn[1] }];
     const names = NAMES.slice().sort(() => Math.random() - 0.5);
-    if (cfg.aiHiders) UI.loading(true, 'Chameleons are painting…');
+    if (cfg.aiHiders) UI.loading(true, 'Chameleons are painting themselves…');
     for (let i = 0; i < cfg.aiHiders; i++) {
       await nextFrame();
       const c = new Cham({ id: 'aih' + i + uid(), name: names[i % names.length], shape: pick(Object.keys(SHAPES)), eyes: pick(Object.keys(EYES)), color: TAG_COLORS[(i + 3) % TAG_COLORS.length] });
       if (Math.random() < 0.2) c.setSize('petite');
       const s = findSpot(c, taken); taken.push(s);
-      c.root.position.set(s.x, s.y, s.z); c.setYaw(s.yaw); c.setPose(s.pose);
-      if (s.pose === 'flat') snapToWall(c, 1.2);
+      c.root.position.set(s.x, s.y, s.z); c.setYaw(s.yaw); c.setPose(s.pose, true);
+      if (POSES[s.pose].wall) snapToWall(c, 1.2);
       autoCamo(c, cfg.skill || D.hiderSkill);
       const p = c.root.position;
-      aiHiders.push({ id: c.id, name: c.name, shape: c.shape, size: c.size, pose: c.pose, x: p.x, y: p.y, z: p.z, yaw: c.yaw, rough: c.mat.roughness, color: c.color, tex: c.texURL() });
+      aiHiders.push({ id: c.id, name: c.name, shape: c.shape, eyes: c.eyes, size: c.size, pose: c.pose, x: p.x, y: p.y, z: p.z, yaw: c.yaw, rough: c.mat.roughness, color: c.color, tex: c.texURL() });
       c.dispose();
     }
     const aiHunters = [];
-    for (let i = 0; i < cfg.aiHunters; i++) aiHunters.push({ id: 'aiH' + i + uid(), name: `Hunter ${i + 1}`, avatar: randomHunterAvatar(i) });
+    for (let i = 0; i < cfg.aiHunters; i++) aiHunters.push({ id: 'aiH' + i + uid(), name: `Hunter ${i + 1}`, avatar: randomHunterAvatar(i + Math.floor(Math.random() * 6)) });
     return { map: cfg.map, mode: cfg.mode || 'classic', cfg, players, aiHiders, aiHunters };
   },
   async setupRound(P) {
+    this.phase = 'loading'; UI.hubHud(false); UI.wheel(false);
     UI.loading(true, 'Loading ' + (MAPS[P.map]?.name || 'map') + '…');
     await nextFrame();
-    this.clearRound();
+    this.clearRound(); disposeMenuDoll();
     if (!MAP || MAP.id !== P.map) loadMap(P.map);
     this.P = P; this.D = DIFF[P.cfg.diff] || DIFF.normal;
     for (const a of P.aiHiders) {
-      const c = new Cham({ id: a.id, name: a.name, shape: a.shape, color: a.color });
-      c.setSize(a.size); c.setYaw(a.yaw); c.setPose(a.pose);
+      const c = new Cham({ id: a.id, name: a.name, shape: a.shape, eyes: a.eyes, color: a.color });
+      c.size = a.size; c.setYaw(a.yaw); c.setPose(a.pose, true);
       c.root.position.set(a.x, a.y, a.z);
       c.mat.roughness = a.rough; c.loadTex(a.tex);
       this.hiders.push(c);
@@ -440,15 +502,16 @@ const G = {
     toolVM.visible = false;
     if (this.fp) setToolVM(this.myHunter.avatar.tool);
     this.stats.start = 0;
-    UI.loading(false); UI.screen(null);
+    UI.loading(false); UI.screen(null); UI.hubHud(false);
     this.setPhase('prep', P.cfg.prep);
     UI.status();
-    if (this.my) toast('Click to look around · F to paint yourself · Enter when ready', 'good');
+    if (this.my) toast('Click to look around · F to paint · R for poses · Enter when ready', 'good');
     else if (this.fp) toast('You are a hunter. Wait for the gate…', 'warn');
+    feed(`<b>${esc(MAPS[P.map].name)}</b> · ${P.mode === 'infection' ? 'Infection' : 'Classic'}`, 'sys');
     this.lock();
   },
   setPhase(p, time) {
-    this.phase = p; this.timer = time;
+    this.phase = p; this.timer = time; this.phaseLen = time;
     UI.hud(true);
     UI.blind(p === 'prep' && this.view === 'first' && !this.party);
     if (p === 'hunt') {
@@ -458,6 +521,7 @@ const G = {
       if (this.isHost) for (const h of this.hunters) if (h.ai) h.pickGoal();
       if (this.paint) togglePaint();
       toast(this.view === 'first' ? 'Go! Find them all.' : 'The hunters are coming. Freeze!', 'warn');
+      feed('The gate is open', 'warn');
     }
     UI.refreshBars();
   },
@@ -479,7 +543,7 @@ const G = {
     this.online = false; this.isHost = true; this.myId = 'me';
     const D = DIFF[diff];
     const players = [];
-    for (let i = 0; i < humans; i++) players.push({ id: 'pp' + i, name: `Player ${i + 1}`, role: 'hider', profile: { ...PROFILE, tag: TAG_COLORS[i], cham: { shape: Object.keys(SHAPES)[i % 6], eyes: Object.keys(EYES)[i % 7] } } });
+    for (let i = 0; i < humans; i++) players.push({ id: 'pp' + i, name: `Player ${i + 1}`, role: 'hider', profile: { ...PROFILE, tag: TAG_COLORS[i], cham: { shape: Object.keys(SHAPES)[i % 5], eyes: Object.keys(EYES)[i % 9] } } });
     players.push({ id: 'me', name: 'Seeker', role: 'none', profile: PROFILE });
     const P = await this.buildPayload(players, { map, diff, mode: 'classic', prep: D.prep + 15, hunt: D.seekTime, aiHunters: 0, aiHiders: ai, skill: D.seekSkill });
     P.partyHidden = true;
@@ -501,7 +565,8 @@ const G = {
     if (P.idx < P.order.length) {
       const c = this.my = P.order[P.idx]; c.local = true;
       c.root.visible = true; c.root.position.set(MAP.playerSpawn[0], 0, MAP.playerSpawn[1]); c.setYaw(Math.PI);
-      this.view = 'third'; this.ctrl.yaw = 0;
+      this.view = 'third'; this.ctrl.yaw = 0; this.ink = 100;
+      this.ab.clones = AB.clones; this.ab.decoys = AB.decoys;
       this.setPhase('prep', this.P.cfg.prep);
     } else {
       if (this.my) this.my.local = false;
@@ -519,14 +584,14 @@ const G = {
   finishPrep() {
     if (this.party && this.party.idx < this.party.order.length && this.view === 'third') {
       if (this.paint) togglePaint();
-      if (this.my) this.my.local = false;
+      if (this.my) { this.my.local = false; this.my.rebake(); }
       this.party.idx++; this.handoff(); return;
     }
     if (!this.isHost) return;
     this.emit({ e: 'phase', phase: 'hunt', timer: this.P.cfg.hunt });
   },
 
-  /* ---------- events (host-authoritative) ---------- */
+  /* ---------- events (host-authoritative where it matters) ---------- */
   emit(ev) { if (this.online) Net.relay({ k: 'ev', ev }); this.applyEvent(ev); },
   hostTag(targetId, byId) {
     if (!this.isHost || this.phase !== 'hunt') return;
@@ -550,7 +615,7 @@ const G = {
   },
   hostEnd() {
     if (!this.isHost || this.phase === 'end') return;
-    const list = this.realHiders().map((c) => ({ id: c.id, name: c.name, ok: !c.caught, at: c.caughtAt ?? null, human: c.human }));
+    const list = this.realHiders().map((c) => ({ id: c.id, name: c.name, ok: !c.caught, at: c.caughtAt ?? null, human: c.human, by: c.caughtBy || null }));
     this.emit({ e: 'end', list, winner: list.some((x) => x.ok) ? 'hiders' : 'hunters' });
   },
   applyEvent(ev) {
@@ -558,14 +623,16 @@ const G = {
       case 'phase': this.setPhase(ev.phase, ev.timer); break;
       case 'caught': {
         const c = this.findCham(ev.id); if (!c || c.caught) break;
-        c.caught = true; c.caughtAt = ev.at; burst(c); Sound.pop(c.center()); c.root.visible = false;
+        c.caught = true; c.caughtAt = ev.at; c.caughtBy = ev.by; burst(c); Sound.pop(c.center()); c.root.visible = false;
         const by = this.findHunter(ev.by);
         floatLabel(`${c.name} found!`, c.center(), '#ff5d6c', '#fff');
         for (const h of this.hunters) h.sus.delete(c);
         if (by) by.doSwing();
+        if (by && by === this.myHunter) this.stats.finds++;
+        feed(`<b>${esc(by ? by.name : 'A hunter')}</b> found <b>${esc(c.name)}</b>`, 'bad');
         if (c === this.my) {
-          if (this.P.mode !== 'infection') { toast(`${by ? by.name : 'A hunter'} found you!`, 'bad'); Sound.lose(); this.view = 'spec'; this.specIdx = 0; if (this.paint) togglePaint(); }
-        } else toast(by?.local ? `You found ${c.name}!` : `${by ? by.name : 'A hunter'} found ${c.name}`, by?.local ? 'good' : 'bad');
+          if (this.P.mode !== 'infection') { toast(`${by ? by.name : 'A hunter'} found you!`, 'bad'); Sound.lose(); this.view = 'spec'; this.specIdx = 0; if (this.paint) togglePaint(); UI.wheel(false); }
+        } else if (by?.local) toast(`You found ${c.name}!`, 'good');
         UI.status(); break;
       }
       case 'clonehit': {
@@ -574,8 +641,9 @@ const G = {
         const by = this.findHunter(ev.by);
         if (by) { by.doSwing(); if (by.ai) { by.confused = 2.2; by.state = 'scan'; by.scanT = 1; by.focus = null; } }
         for (const h of this.hunters) h.sus.delete(c);
-        toast(`${by ? by.name : 'A hunter'} bonked a clone!`, 'good');
-        if (c.ownerId === this.myId) this.stats.clonesFooled++;
+        feed(`<b>${esc(by ? by.name : 'A hunter')}</b> bonked a clone`, 'good');
+        if (by?.local) toast('That was a clone!', 'warn');
+        if (c.ownerId === this.myId) { this.stats.clonesFooled++; toast('Your clone fooled them! +40 XP', 'good'); }
         break;
       }
       case 'convert': {
@@ -585,9 +653,10 @@ const G = {
         if (ev.pid === this.myId) {
           this.myHunter = h; h.group.visible = false; this.my = null;
           this.fp = { pos: new V3(ev.x, 0, ev.z), vy: 0, onGround: true, r: 0.3, h: 1.75, yaw: this.ctrl.yaw, pitch: 0 };
-          setToolVM(h.avatar.tool); this.view = 'first'; if (this.paint) togglePaint();
+          setToolVM(h.avatar.tool); this.view = 'first'; if (this.paint) togglePaint(); UI.wheel(false);
           toast('You got infected! Now you hunt.', 'warn'); Sound.alert(null);
-        } else toast(`${prof.name} joined the hunters!`, 'warn');
+        }
+        feed(`<b>${esc(prof.name)}</b> joined the hunters`, 'warn');
         break;
       }
       case 'aihunter': {
@@ -597,17 +666,43 @@ const G = {
       }
       case 'whistle': {
         const c = this.findCham(ev.id); if (!c || c.caught) break;
-        const p = c.center(); Sound.whistle(p);
-        const note = textSprite('♪', '#ffffff', '#222', 0.45); note.position.copy(p).add(new V3(0, 0.9, 0)); note.material.depthTest = true; scene.add(note);
-        this.labels.push({ s: note, life: 1.6, vy: 0.5 });
+        const p = c.center(); Sound.whistle(p); noteSprite(p);
         if (this.isHost) for (const h of this.hunters) if (h.ai && h.pos.distanceTo(p) < 22 && Math.random() < (ev.chance ?? 0.6)) h.hear(p);
         break;
       }
+      case 'decoy': {
+        const p = new V3(ev.x, ev.y, ev.z); Sound.whistle(p); noteSprite(p, '#ffd43b');
+        const m = new THREE.Mesh(new THREE.SphereGeometry(0.09, 12, 8), new THREE.MeshBasicMaterial({ color: 0xffd43b })); m.position.copy(p); scene.add(m);
+        this.fx.push({ m, v: new V3(), life: 3, still: true });
+        if (this.isHost) for (const h of this.hunters) if (h.ai && h.pos.distanceTo(p) < 24 && Math.random() < 0.85) h.hear(p);
+        break;
+      }
+      case 'ping': {
+        const p = new V3(ev.x, ev.y || 0, ev.z); Sound.ping(p.clone().setY(1.5)); pingRing(p);
+        let n = 0;
+        for (const c of this.targets()) {
+          if (c.root.position.distanceTo(p) > 8.5) continue;
+          n++; setTimeout(() => { if (!c.caught) Sound.chirp(c.center()); }, 350 + Math.random() * 500);
+          if (c === this.my) toast('Pinged! A hunter can hear you chirp.', 'warn');
+          if (this.isHost) { const h = this.findHunter(ev.id); if (h && h.ai && Math.random() < 0.75) h.hear(c.root.position); }
+        }
+        const h = this.findHunter(ev.id);
+        if (h?.local) toast(n ? `Ping: ${n} chirp${n === 1 ? '' : 's'} nearby. Listen!` : 'Ping: nothing nearby', n ? 'good' : '');
+        break;
+      }
+      case 'pb': if (ev.by !== this.myId) spawnBall(new V3(...ev.p), new V3(...ev.v), false); break;
+      case 'splat': {
+        const c = this.findCham(ev.id); if (!c) break;
+        splatOn(c, ev.uv, ev.col);
+        if (c === this.my) toast('You got splatted with paint! Repaint fast.', 'bad');
+        break;
+      }
+      case 'splatw': splatWall(new V3(...ev.p), new V3(...ev.n), ev.col); break;
       case 'clone': {
         if (this.findCham(ev.id)) break;
         const owner = this.findCham(ev.owner); if (!owner) break;
-        const c = new Cham({ id: ev.id, name: owner.name + "'s clone", ownerId: owner.ownerId, color: owner.color, shape: owner.shape });
-        c.copyFrom(owner); c.isClone = true; c.setPose(ev.pose); c.root.position.set(ev.x, ev.y, ev.z); c.setYaw(ev.yaw);
+        const c = new Cham({ id: ev.id, name: owner.name + "'s clone", ownerId: owner.ownerId, color: owner.color, shape: owner.shape, eyes: owner.eyes });
+        c.copyFrom(owner); c.isClone = true; c.setPose(ev.pose, true); c.root.position.set(ev.x, ev.y, ev.z); c.setYaw(ev.yaw);
         this.hiders.push(c); break;
       }
       case 'swing': { const h = this.findHunter(ev.id); if (h && !h.local) { h.doSwing(); Sound.swoosh(h.eye()); } break; }
@@ -623,34 +718,55 @@ const G = {
       list.forEach((c, i) => setTimeout(() => this.emit({ e: 'whistle', id: c.id, chance: 0.45 }), i * 400));
     } else alive.forEach((c, i) => setTimeout(() => this.emit({ e: 'whistle', id: c.id, chance: c.human ? 0.65 : 0.4 }), i * 450));
     toast('Forced taunt! Hiders whistle.', 'warn');
+    feed('Forced taunt', 'warn');
   },
   showEnd(ev) {
-    this.phase = 'end'; if (this.paint) togglePaint();
+    this.phase = 'end'; if (this.paint) togglePaint(); UI.wheel(false);
     if (document.pointerLockElement) document.exitPointerLock();
     UI.blind(false); toolVM.visible = false;
     const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
     const surv = ev.list.filter((x) => x.ok);
     for (const x of surv) { const c = this.findCham(x.id); if (c) floatLabel(`${c.name} was here!`, c.center(), '#3ad49c', '#06261a', 999); }
-    let title, text;
-    const amHider = this.P.players.find((p) => p.id === this.myId)?.role === 'hider';
+    let title, text, won;
+    const role = this.P.players.find((p) => p.id === this.myId)?.role;
     const me = ev.list.find((x) => x.id === this.myId);
-    if (amHider && me) {
-      const huntLen = this.P.cfg.hunt;
-      const score = Math.round((me.ok ? huntLen : (me.at || 0)) * 10 + this.stats.taunts * 150 + this.stats.clonesFooled * 300);
+    const xp = [['Played a round', 25]];
+    if (role === 'hider' && me) {
+      const huntLen = this.P.cfg.hunt, alive = me.ok ? huntLen : (me.at || 0);
+      won = me.ok || ev.winner === 'hiders';
+      const score = Math.round(alive * 10 + this.stats.taunts * 150 + this.stats.clonesFooled * 300);
       title = me.ok ? 'You survived!' : ev.winner === 'hiders' ? 'Caught, but your team survived' : 'The hunters win';
       text = `Score ${score} · taunts ${this.stats.taunts} · clones bonked ${this.stats.clonesFooled}` + (this.online ? '' : ` · closest call ${Math.round(clamp(this.stats.maxSus, 0, 1) * 100)}% attention`);
+      xp.push(['Time hidden', Math.round(alive / 3)]);
+      if (me.ok) xp.push(['Survived', 100]);
+      if (ev.winner === 'hiders') xp.push(['Team win', 50]);
+      if (this.stats.taunts) xp.push([`Taunts ×${this.stats.taunts}`, this.stats.taunts * 20]);
+      if (this.stats.clonesFooled) xp.push([`Clones bonked ×${this.stats.clonesFooled}`, this.stats.clonesFooled * 40]);
+      PROFILE.stats.survived += me.ok ? 1 : 0; PROFILE.stats.taunts += this.stats.taunts;
+      PROFILE.stats.bestScore = Math.max(PROFILE.stats.bestScore, score);
       (me.ok ? Sound.win : Sound.lose)();
     } else {
       const found = ev.list.length - surv.length;
+      won = ev.winner === 'hunters';
       title = ev.winner === 'hunters' ? (this.myHunter ? 'You found everyone!' : 'Hunters win') : `Found ${found} of ${ev.list.length}`;
       text = ev.winner === 'hunters' ? `Cleared in ${fmt(this.t - this.stats.start)}.` : 'Hit "Show hiding spots" to see where the survivors were.';
-      ((ev.winner === 'hunters') === !!this.myHunter ? Sound.win : Sound.lose)();
+      if (this.stats.finds) xp.push([`Finds ×${this.stats.finds}`, this.stats.finds * 60]);
+      if (this.stats.splats) xp.push([`Paint hits ×${this.stats.splats}`, this.stats.splats * 10]);
+      if (won && this.myHunter) xp.push(['Hunter win', 80]);
+      PROFILE.stats.found += this.stats.finds;
+      (won === !!this.myHunter ? Sound.win : Sound.lose)();
     }
+    PROFILE.stats.games++; if (won) PROFILE.stats.wins++;
+    const gained = xp.reduce((a, [, v]) => a + v, 0), before = levelInfo(PROFILE.xp).level;
+    PROFILE.xp += gained; saveProfile();
+    const after = levelInfo(PROFILE.xp).level;
+    const unlocks = [];
+    for (const kind in UNLOCKS) for (const [k, l] of Object.entries(UNLOCKS[kind])) if (l > before && l <= after) unlocks.push(unlockName(kind, k));
+    if (after > before) setTimeout(() => { Sound.levelup(); toast(`Level up! You are now level ${after}`, 'good'); }, 900);
     this.view = 'spec';
     this.revealList = surv.map((x) => this.findCham(x.id)).filter(Boolean);
     if (!this.revealList.length) this.revealList = this.realHiders();
-    $('#revealBtn').textContent = surv.length ? 'Show hiding spots' : 'Replay where they hid';
-    UI.end(title, text, ev.list.map((x) => ({ name: x.name, ok: x.ok, txt: x.ok ? 'survived' : `found at ${fmt(x.at ?? 0)}` })), this.online);
+    UI.end({ title, text, won, surv: surv.length, items: ev.list.map((x) => ({ name: x.name, ok: x.ok, txt: x.ok ? 'survived' : `found at ${fmt(x.at ?? 0)}` })), xp, gained, before, after, unlocks, online: this.online });
     if (this.online && this.isHost) Net.send({ t: 'lobby', lobby: { inGame: false } });
   },
   startReveal() {
@@ -670,10 +786,11 @@ const G = {
     camera.lookAt(p);
     if (R.t > 3.6) { R.i++; R.t = 0; if (R.i >= R.list.length) { this.reveal = null; for (const x of R.list) if (x.caught) x.root.visible = false; UI.screen('end'); } }
   },
-  lock() { if (this.paint || this.phase === 'handoff') return; try { const p = renderer.domElement.requestPointerLock?.(); p?.catch?.(() => { }); } catch (e) { /* needs a user gesture */ } },
+  lock() { if (this.paint || this.phase === 'handoff' || UI.wheelOpen || UI.panelOpen) return; try { const p = renderer.domElement.requestPointerLock?.(); p?.catch?.(() => { }); } catch (e) { /* needs a user gesture */ } },
   toMenu() {
     if (this.online) { Net.close(); this.online = false; if (window.mcNative) mcNative.hostStop(); }
-    this.clearRound(); this.phase = 'menu'; UI.hud(false); UI.screen('menu');
+    this.clearRound(); this.phase = 'menu'; this.party = null;
+    UI.hud(false); UI.hubHud(false); UI.screen('menu'); showMenuScene();
     if (document.pointerLockElement) document.exitPointerLock();
   },
 
@@ -681,18 +798,22 @@ const G = {
   netTick(dt) {
     if (!this.online || !Net.connected) return;
     this.sendT -= dt; this.texT -= dt; this.aiSendT -= dt; this.timerSendT -= dt;
+    const hub = this.phase === 'hub';
     if (this.sendT <= 0) {
-      this.sendT = 1 / 12;
+      this.sendT = hub ? 1 / 10 : 1 / 12;
       if (this.my && !this.my.caught) {
         const c = this.my, p = c.root.position;
-        Net.relay({ k: 'st', a: 'c', id: c.id, p: [+p.x.toFixed(3), +p.y.toFixed(3), +p.z.toFixed(3)], y: +c.yaw.toFixed(3), po: c.pose, sh: c.shape, sz: c.size, r: +c.mat.roughness.toFixed(2), m: +c.mat.metalness.toFixed(2), mv: c.speed > 0.4 ? 1 : 0 });
+        const msg = { k: hub ? 'hst' : 'st', a: 'c', id: c.id, p: [+p.x.toFixed(3), +p.y.toFixed(3), +p.z.toFixed(3)], y: +c.yaw.toFixed(3), po: c.pose, sh: c.shape, sz: c.size, r: +c.mat.roughness.toFixed(2), m: +c.mat.metalness.toFixed(2), mv: c.speed > 0.4 ? 1 : 0, em: c.emote || 0, air: c.body.onGround ? 0 : 1 };
+        if (hub) { msg.ready = this.hub.ready ? 1 : 0; msg.vote = this.hub.vote; msg.name = PROFILE.name; msg.eyes = c.eyes; msg.tag = PROFILE.tag; }
+        Net.relay(msg);
       }
-      if (this.myHunter && this.fp) {
+      if (this.myHunter && this.fp && !hub) {
         const p = this.fp.pos;
         Net.relay({ k: 'st', a: 'h', id: this.myHunter.id, p: [+p.x.toFixed(3), +p.y.toFixed(3), +p.z.toFixed(3)], y: +(this.fp.yaw + Math.PI).toFixed(3) });
       }
     }
-    if (this.my && this.my.texVer !== this.my.sentVer && this.texT <= 0) { this.texT = 0.6; this.my.sentVer = this.my.texVer; Net.relay({ k: 'tex', id: this.my.id, url: this.my.texURL() }); }
+    if (this.my && this.my.texVer !== this.my.sentVer && this.texT <= 0) { this.texT = 0.6; this.my.sentVer = this.my.texVer; Net.relay({ k: hub ? 'htex' : 'tex', id: this.my.id, url: this.my.texURL() }); }
+    if (hub) return;
     if (this.isHost && this.aiSendT <= 0) {
       this.aiSendT = 0.1;
       const list = this.hunters.filter((h) => h.ai).map((h) => [h.id, +h.pos.x.toFixed(2), +h.pos.y.toFixed(2), +h.pos.z.toFixed(2), +h.yaw.toFixed(2), h.state]);
@@ -704,41 +825,217 @@ const G = {
     const fromHost = from === Net.hostId;
     switch (d.k) {
       case 'start': if (fromHost) this.setupRound(d.P); break;
-      case 'ev': if (fromHost || ['whistle', 'clone', 'swing'].includes(d.ev.e)) this.applyEvent(d.ev); break;
+      case 'ev': if (fromHost || ['whistle', 'clone', 'swing', 'ping', 'pb', 'splat', 'splatw', 'decoy'].includes(d.ev.e)) this.applyEvent(d.ev); break;
       case 'tag': if (this.isHost) this.hostTag(d.target, d.by); break;
       case 'timer': if (fromHost && Math.abs(this.timer - d.t) > 0.6) this.timer = d.t; break;
       case 'ai': if (!fromHost) break; for (const [id, x, y, z, yaw, st] of d.list) { const h = this.findHunter(id); if (h) { h.target = { x, y, z, yaw }; if (h.state !== st && st === 'chase') Sound.alert(h.eye()); h.state = st; } } break;
       case 'st': {
+        if (this.phase === 'hub') break;
         if (d.a === 'c') {
           const c = this.findCham(d.id); if (!c || c.local) break;
-          if (c.shape !== d.sh) c.setShape(d.sh);
-          if (c.size !== d.sz) c.setSize(d.sz);
-          if (c.pose !== d.po) c.setPose(d.po);
-          c.mat.roughness = d.r; c.mat.metalness = d.m;
-          c.target = { x: d.p[0], y: d.p[1], z: d.p[2], yaw: d.y }; c.remoteMoving = d.mv;
+          applyRemoteCham(c, d);
         } else { const h = this.findHunter(d.id); if (h && !h.local) h.target = { x: d.p[0], y: d.p[1], z: d.p[2], yaw: d.y }; }
         break;
       }
       case 'tex': { const c = this.findCham(d.id); if (c && !c.local) c.loadTex(d.url); break; }
+      case 'hst': hubRemote(from, d); break;
+      case 'htex': { const o = this.hub?.others.get(from); if (o) o.cham.loadTex(d.url); else if (this.hub) this.hub.pendingTex.set(from, d.url); break; }
+      case 'cd': if (fromHost && this.hub) { this.hub.cd = d.t; if (d.t != null && d.t <= 3 && d.t > 0) Sound.tick(); } break;
     }
   },
-  async hostStartOnline() {
+  async hostStartOnline(mapOverride) {
     const L = this.lobby, s = L.settings, ids = [...L.players.keys()];
-    if (!ids.length) return;
-    const nHunters = ids.length === 1 ? 0 : clamp(s.hunters, 1, ids.length - 1);
-    const shuffled = ids.slice().sort(() => Math.random() - 0.5);
-    const hunterIds = new Set(shuffled.slice(0, nHunters));
-    const players = ids.map((id) => { const p = L.players.get(id); return { id, name: p.name, profile: p.profile, role: hunterIds.has(id) ? 'hunter' : 'hider' }; });
-    const aiHunters = nHunters === 0 ? Math.max(1, s.aiHunters) : s.aiHunters;
-    Net.send({ t: 'lobby', lobby: { inGame: true, map: s.map, mode: s.mode } });
-    const P = await this.buildPayload(players, { map: s.map, diff: s.diff, mode: s.mode, prep: s.prep, hunt: s.hunt, aiHunters, aiHiders: s.aiHiders });
-    Net.relay({ k: 'start', P });
-    await this.setupRound(P);
+    if (!ids.length || this.starting) return;
+    this.starting = true;
+    try {
+      const map = mapOverride || s.map;
+      const nHunters = ids.length === 1 ? 0 : clamp(s.hunters, 1, ids.length - 1);
+      const shuffled = ids.slice().sort(() => Math.random() - 0.5);
+      const hunterIds = new Set(shuffled.slice(0, nHunters));
+      const players = ids.map((id) => { const p = L.players.get(id); return { id, name: p.name, profile: p.profile, role: hunterIds.has(id) ? 'hunter' : 'hider' }; });
+      const aiHunters = nHunters === 0 ? Math.max(1, s.aiHunters) : s.aiHunters;
+      Net.send({ t: 'lobby', lobby: { inGame: true, map, mode: s.mode } });
+      const P = await this.buildPayload(players, { map, diff: s.diff, mode: s.mode, prep: s.prep, hunt: s.hunt, aiHunters, aiHiders: s.aiHiders });
+      Net.relay({ k: 'start', P });
+      await this.setupRound(P);
+    } finally { this.starting = false; }
   },
 };
 const nextFrame = () => new Promise((r) => setTimeout(r, 16));
+function applyRemoteCham(c, d) {
+  if (c.shape !== d.sh && SHAPES[d.sh]) c.setShape(d.sh);
+  if (c.size !== d.sz && SIZES[d.sz]) c.setSize(d.sz);
+  if (c.pose !== d.po && POSES[d.po]) c.setPose(d.po);
+  if (d.em && c.emote !== d.em) c.setEmote(d.em); else if (!d.em && c.emote) c.emote = null;
+  c.mat.roughness = d.r; c.mat.metalness = d.m;
+  c.target = { x: d.p[0], y: d.p[1], z: d.p[2], yaw: d.y }; c.remoteMoving = d.mv; c.body.onGround = !d.air;
+}
+function unlockName(kind, k) {
+  const label = { shape: SHAPES[k]?.label, eyes: EYES[k], hat: HATS[k], visor: VISORS[k], tool: TOOLS[k] }[kind];
+  const what = { shape: 'body', eyes: 'face', hat: 'hat', visor: 'hunter face', tool: 'weapon' }[kind];
+  return `${label} ${what}`;
+}
 
-/* ---------- effects ---------- */
+/* ================= lobby hub ================= */
+function clearHub() {
+  const H = G.hub; if (!H) return;
+  for (const o of H.others.values()) o.cham.dispose();
+  if (H.me) H.me.dispose();
+  if (H.dummy) H.dummy.dispose();
+  for (const b of G.bubbles) b.s.parent?.remove(b.s);
+  G.bubbles = [];
+  G.hub = null;
+  if (G.phase === 'hub') { G.my = null; G.hiders = []; G.hunters = []; }
+}
+function enterHub() {
+  G.clearRound(); disposeMenuDoll();
+  if (!MAP || MAP.id !== 'lobby') loadMap('lobby');
+  const H = MAPS.lobby.hub;
+  const me = new Cham({ id: G.online ? Net.id : 'me', name: PROFILE.name, local: true, human: true, color: PROFILE.tag, shape: PROFILE.cham.shape, eyes: PROFILE.cham.eyes });
+  me.root.position.set(MAP.playerSpawn[0] + rand(-1.5, 1.5), 0, MAP.playerSpawn[1] + rand(-1, 1)); me.setYaw(Math.PI);
+  const dummy = new Hunter({ id: 'tester', name: 'Camo tester', avatar: { color: '#5b5f6b', hat: 'none', visor: 'goggles', tool: 'hammer' }, ai: true, x: H.dummy.x, z: H.dummy.z, y: 0.18 });
+  dummy.yaw = dummy.look = H.dummy.yaw; dummy.pitch = -0.12; dummy.sync(); dummy.state = 'statue';
+  G.hub = { me, dummy, others: new Map(), ready: false, vote: null, cd: null, cdT: 0, pendingTex: new Map(), testT: 0, testRate: 0, testShow: 0, voteKey: '', lastPad: null };
+  G.my = me; G.hiders = [me]; G.hunters = [dummy];
+  G.phase = 'hub'; G.view = 'third'; G.ctrl.yaw = 0; G.ctrl.pitch = 0.3; G.paused = false;
+  G.D = DIFF.normal;
+  UI.hud(false); UI.screen(null); UI.hubHud(true); UI.renderHub();
+  MAPS.lobby.hub.setVotes({}, null);
+  if (G.online && Net.isHost) pushLobby();
+}
+function hubRemote(from, d) {
+  const H = G.hub; if (!H || G.phase !== 'hub') return;
+  let o = H.others.get(from);
+  const p = G.lobby.players.get(from);
+  if (!o) {
+    const c = new Cham({ id: from, name: d.name || p?.name || 'Player', human: true, color: d.tag || p?.profile?.tag, shape: d.sh, eyes: d.eyes });
+    c.root.position.set(d.p[0], d.p[1], d.p[2]); c.setYaw(d.y);
+    o = { cham: c, ready: false, vote: null, seen: 0, tag: null, tagKey: '' };
+    H.others.set(from, o); G.hiders.push(c);
+    const tex = H.pendingTex.get(from); if (tex) { c.loadTex(tex); H.pendingTex.delete(from); }
+  }
+  const c = o.cham;
+  if (d.eyes && d.eyes !== c.eyes && !c.painted) { c.eyes = d.eyes; c.blank(); }
+  applyRemoteCham(c, d);
+  o.seen = G.t; c.root.visible = true;
+  if (o.ready !== !!d.ready) { o.ready = !!d.ready; UI.renderHub(); }
+  if (o.vote !== d.vote) { o.vote = d.vote; refreshVotes(); }
+  const key = (d.name || '') + (o.ready ? '1' : '0');
+  if (o.tagKey !== key) {
+    if (o.tag) c.root.remove(o.tag);
+    o.tag = textSprite((o.ready ? '✓ ' : '') + (d.name || 'Player'), o.ready ? '#3ad49c' : 'rgba(15,18,26,.75)', o.ready ? '#06261a' : '#fff', 0.24);
+    o.tag.position.y = 1.65; c.root.add(o.tag); o.tagKey = key; c.name = d.name || c.name;
+  }
+}
+function voteCounts() {
+  const counts = {}, H = G.hub; if (!H) return counts;
+  if (H.vote) counts[H.vote] = 1;
+  for (const o of H.others.values()) if (o.vote && G.t - o.seen < 3) counts[o.vote] = (counts[o.vote] || 0) + 1;
+  return counts;
+}
+function topVote() {
+  const c = voteCounts(), ids = Object.keys(c);
+  if (!ids.length) return null;
+  const max = Math.max(...ids.map((k) => c[k]));
+  return pick(ids.filter((k) => c[k] === max));
+}
+function refreshVotes() {
+  const H = G.hub; if (!H) return;
+  const c = voteCounts(), key = JSON.stringify(c) + H.vote;
+  if (key === H.voteKey) return;
+  H.voteKey = key; MAPS.lobby.hub.setVotes(c, H.vote); UI.renderHub();
+}
+function hubPlayers() {
+  const H = G.hub, out = [];
+  if (!G.online) return [{ id: 'me', name: PROFILE.name, ready: H.ready, me: true, host: true, tag: PROFILE.tag }];
+  for (const [id, p] of G.lobby.players) {
+    const o = H.others.get(id), me = id === Net.id;
+    out.push({ id, name: p.name, tag: p.profile?.tag, me, host: id === Net.hostId, ready: me ? H.ready : !!(o && o.ready && G.t - o.seen < 3), inHub: me || !!(o && G.t - o.seen < 3) });
+  }
+  return out;
+}
+function updateHub(dt) {
+  const H = G.hub, M = MAPS.lobby.hub, me = G.my;
+  if (!H || !me) return;
+  updateMyCham(dt);
+  const p = me.root.position;
+  const onReady = Math.hypot(p.x - M.readyPad.x, p.z - M.readyPad.z) < M.readyPad.r && p.y < 0.3;
+  if (onReady !== H.ready) { H.ready = onReady; Sound.ready(onReady); UI.renderHub(); M.readyPad.mesh.material.color.set(onReady ? 0x3ad49c : 0x1f8f66); }
+  for (const vp of M.votePads) {
+    if (Math.hypot(p.x - vp.x, p.z - vp.z) < vp.r && p.y < 0.3 && H.vote !== vp.id) { H.vote = vp.id; Sound.click(); toast(`Voted for ${MAPS[vp.id].name}`, 'good'); refreshVotes(); }
+  }
+  for (const jp of M.jumpPads) if (me.body.onGround && Math.hypot(p.x - jp.x, p.z - jp.z) < jp.r && p.y < 0.2) { me.body.vy = 11.8; me.body.onGround = false; Sound.boing(); }
+  for (const [id, o] of H.others) {
+    const c = o.cham;
+    if (G.t - o.seen > 3) { c.root.visible = false; continue; }
+    if (c.target) {
+      const k = Math.min(1, dt * 12), q = c.root.position;
+      q.x = lerp(q.x, c.target.x, k); q.y = lerp(q.y, c.target.y, k); q.z = lerp(q.z, c.target.z, k);
+      c.setYaw(c.yaw + angDiff(c.yaw, c.target.yaw) * k);
+    }
+    c.animate(dt, !!c.remoteMoving);
+  }
+  if (!G.online) { for (const k of H.others.keys()) H.others.delete(k); }
+  // camo tester
+  const D = H.dummy; D.animTool(dt);
+  const dx = p.x - D.pos.x, dz = p.z - D.pos.z, dist = Math.hypot(dx, dz);
+  const facing = (dx * Math.sin(D.yaw) + dz * Math.cos(D.yaw)) / Math.max(dist, 0.01);
+  H.testShow = dist < 11 && facing > 0.35 ? Math.min(1, H.testShow + dt * 3) : Math.max(0, H.testShow - dt * 3);
+  H.testT -= dt;
+  if (H.testShow > 0.5 && H.testT <= 0) {
+    H.testT = 0.25;
+    D.look = D.yaw + clamp(Math.atan2(dx, dz) - D.yaw, -0.6, 0.6); D.pitch = Math.atan2(me.center().y - 1.73, dist);
+    const gains = D.perceive([me], 0.25); D.sus.clear();
+    const g = (gains.get(me) || 0) / 0.25;
+    H.testRate = lerp(H.testRate, g, 0.5);
+  }
+  refreshVotes();
+  // countdown (host or offline)
+  const players = hubPlayers(), allReady = players.length > 0 && players.every((x) => x.ready);
+  if (!G.online || Net.isHost) {
+    if (allReady && !G.starting) {
+      if (H.cd == null) { H.cd = G.online ? 5 : 3; H.cdT = 0; if (G.online) Net.relay({ k: 'cd', t: H.cd }); Sound.tick(); }
+      H.cdT += dt;
+      if (H.cdT >= 1) {
+        H.cdT -= 1; H.cd--;
+        if (G.online) Net.relay({ k: 'cd', t: H.cd });
+        if (H.cd > 0) Sound.tick();
+        if (H.cd <= 0) { H.cd = null; hubStart(); return; }
+      }
+    } else if (H.cd != null) { H.cd = null; if (G.online) Net.relay({ k: 'cd', t: null }); }
+  }
+  updateCamera(dt);
+  G.netTick(dt);
+}
+function hubStart() {
+  const map = topVote() || (G.online ? G.lobby.settings.map : G.solo.map);
+  if (G.online) { if (Net.isHost) G.hostStartOnline(map); }
+  else { G.solo.map = map; G.startSolo(); }
+}
+function pushLobby() { if (G.online) Net.send({ t: 'lobby', lobby: { settings: G.lobby.settings, map: G.lobby.settings.map, mode: G.lobby.settings.mode } }); UI.renderHub(); }
+
+/* ================= menu scene (your doll on the club floor) ================= */
+let menuDoll = null, menuT = 0, menuPoseT = 0, menuPoseI = 0;
+const MENU_CYCLE = ['stand', 'wave', 'star', 'thinker', 'dance', 'crouch', 'reach', 'cheer', 'kneel'];
+function disposeMenuDoll() { if (menuDoll) { menuDoll.dispose(); menuDoll = null; } }
+function showMenuScene() {
+  if (!MAP || MAP.id !== 'lobby') loadMap('lobby');
+  disposeMenuDoll();
+  menuDoll = new Cham({ name: PROFILE.name, shape: PROFILE.cham.shape, eyes: PROFILE.cham.eyes, color: PROFILE.tag });
+  menuDoll.root.position.set(13.6, 0, 11.2); menuDoll.setYaw(0.35); menuDoll.setPose('stand', true);
+  menuPoseT = 0; menuPoseI = 0;
+}
+function updateMenuScene(dt) {
+  menuT += dt;
+  if (!menuDoll) return;
+  menuPoseT += dt;
+  if (menuPoseT > 3.2) { menuPoseT = 0; menuPoseI = (menuPoseI + 1) % MENU_CYCLE.length; const k = MENU_CYCLE[menuPoseI]; if (POSES[k].emote) menuDoll.setEmote(k); else menuDoll.setPose(k); }
+  menuDoll.animate(dt, false);
+  const sw = Math.sin(menuT * 0.25) * 0.5;
+  camera.position.set(12.0 + sw * 0.6, 1.35, 15.1); camera.lookAt(12.75 + sw * 0.2, 0.82, 11.2);
+}
+
+/* ================= effects ================= */
 const fxGeo = new THREE.BoxGeometry(0.08, 0.08, 0.08);
 function burst(c) {
   const cols = c.avgColors(10), p = c.center();
@@ -752,15 +1049,81 @@ function floatLabel(text, pos, bg, fg, life = 2.2) {
   const s = textSprite(text, bg, fg, 0.26); s.position.copy(pos).add(new V3(0, 0.9, 0)); scene.add(s);
   G.labels.push({ s, life, vy: life > 100 ? 0 : 0.35 });
 }
+function noteSprite(p, bg = '#ffffff') {
+  const note = textSprite('♪', bg, '#222', 0.45); note.position.copy(p).add(new V3(0, 0.9, 0)); note.material.depthTest = true; scene.add(note);
+  G.labels.push({ s: note, life: 1.6, vy: 0.5 });
+}
+function pingRing(p) {
+  const m = new THREE.Mesh(new THREE.RingGeometry(0.9, 1, 48), new THREE.MeshBasicMaterial({ color: 0x4da3ff, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false }));
+  m.rotation.x = -Math.PI / 2; m.position.set(p.x, p.y + 0.06, p.z); scene.add(m);
+  G.rings.push({ m, t: 0 }); G.fxHide.push(m);
+}
+const SPLAT_TEX = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d'); g.fillStyle = '#fff';
+  g.beginPath(); g.arc(64, 64, 34, 0, 7); g.fill();
+  for (let i = 0; i < 14; i++) { const a = Math.random() * 7, r = 30 + Math.random() * 26; g.beginPath(); g.arc(64 + Math.cos(a) * r, 64 + Math.sin(a) * r, 4 + Math.random() * 9, 0, 7); g.fill(); }
+  return new THREE.CanvasTexture(c);
+})();
+function splatWall(p, n, col) {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(0.6, 0.6), new THREE.MeshStandardMaterial({ map: SPLAT_TEX, color: col, transparent: true, roughness: 0.4, polygonOffset: true, polygonOffsetFactor: -2, depthWrite: false }));
+  m.position.copy(p).addScaledVector(n, 0.01); m.lookAt(p.clone().add(n)); m.rotateZ(Math.random() * 6);
+  scene.add(m); G.splats.push(m);
+  if (G.splats.length > 60) { const o = G.splats.shift(); scene.remove(o); o.material.dispose(); }
+  Sound.splatHit(p);
+}
+function splatOn(c, uv, col) {
+  const u = new THREE.Vector2(uv[0], uv[1]);
+  c.paintDot(u, col, 14);
+  for (let i = 0; i < 9; i++) c.paintDot(new THREE.Vector2(u.x + rand(-0.035, 0.035), u.y + rand(-0.035, 0.035)), col, rand(3, 7));
+  c.flush(); Sound.splatHit(c.center());
+}
+const ballGeo = new THREE.SphereGeometry(0.07, 12, 8);
+const rcBall = new THREE.Raycaster();
+function spawnBall(p, v, own) {
+  const m = new THREE.Mesh(ballGeo, new THREE.MeshBasicMaterial({ color: PAINTBALL })); m.position.copy(p); scene.add(m);
+  G.balls.push({ m, v, own, life: 3 }); G.fxHide.push(m);
+}
+function updateBalls(dt) {
+  G.balls = G.balls.filter((b) => {
+    b.life -= dt;
+    const from = b.m.position.clone();
+    b.v.y -= 9.8 * dt;
+    const step = b.v.clone().multiplyScalar(dt), len = step.length();
+    rcBall.set(from, step.clone().normalize()); rcBall.far = len + 0.07;
+    const h = rcBall.intersectObjects([...env, ...G.targets().map((c) => c.mesh)], false)[0];
+    if (h || b.life <= 0) {
+      scene.remove(b.m);
+      if (h && b.own) {
+        const cham = h.object.userData.cham;
+        if (cham) { G.stats.splats++; emitAny({ e: 'splat', id: cham.id, uv: [h.uv.x, h.uv.y], col: PAINTBALL }); toast('Splat! Something over there is not a wall…', 'good'); }
+        else if (h.face) { const n = h.face.normal.clone().transformDirection(h.object.matrixWorld); emitAny({ e: 'splatw', p: [h.point.x, h.point.y, h.point.z], n: [n.x, n.y, n.z], col: PAINTBALL }); }
+      } else if (h && !h.object.userData.cham && h.face) { /* remote ball: the shooter sends the splat */ }
+      return false;
+    }
+    b.m.position.add(step);
+    return true;
+  });
+}
 function updateFx(dt) {
   G.fx = G.fx.filter((f) => {
-    f.life -= dt; f.v.y -= 12 * dt; f.m.position.addScaledVector(f.v, dt);
-    if (f.m.position.y < 0.04) { f.m.position.y = 0.04; f.v.multiplyScalar(0.4); }
-    f.m.rotation.x += dt * 8; f.m.scale.setScalar(Math.max(0.01, Math.min(1, f.life * 2)));
+    f.life -= dt;
+    if (!f.still) { f.v.y -= 12 * dt; f.m.position.addScaledVector(f.v, dt); if (f.m.position.y < 0.04) { f.m.position.y = 0.04; f.v.multiplyScalar(0.4); } f.m.rotation.x += dt * 8; }
+    f.m.scale.setScalar(Math.max(0.01, Math.min(1, f.life * 2)));
     if (f.life <= 0) { scene.remove(f.m); f.m.material.dispose(); return false; }
     return true;
   });
   G.labels = G.labels.filter((l) => { l.life -= dt; l.s.position.y += l.vy * dt; if (l.life <= 0) { scene.remove(l.s); return false; } return true; });
+  G.rings = G.rings.filter((r) => { r.t += dt; const s = 1 + r.t * 9; r.m.scale.set(s, s, 1); r.m.material.opacity = Math.max(0, 0.8 - r.t * 0.85); if (r.t > 0.95) { scene.remove(r.m); return false; } return true; });
+  G.bubbles = G.bubbles.filter((b) => { b.life -= dt; if (b.life <= 0) { b.s.parent?.remove(b.s); return false; } return true; });
+  updateBalls(dt);
+}
+function chatBubble(id, text) {
+  const H = G.hub; if (!H) return;
+  const c = id === (G.online ? Net.id : 'me') ? H.me : H.others.get(id)?.cham;
+  if (!c) return;
+  for (const b of G.bubbles) if (b.c === c) { b.s.parent?.remove(b.s); b.life = 0; }
+  const s = textSprite(text.length > 38 ? text.slice(0, 36) + '…' : text, '#ffffff', '#1b1d22', 0.26); s.position.y = 1.95; c.root.add(s);
+  G.bubbles.push({ s, c, life: 5 });
 }
 
 /* first-person tool view model */
@@ -779,15 +1142,22 @@ const keys = {};
 const mouse = { x: 0, y: 0, down: false, right: false, lastUV: null };
 addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') { if (e.code === 'Escape') e.target.blur(); return; }
+  if (e.code === 'Tab' || e.code === 'Space') e.preventDefault();
+  if (e.repeat && keys[e.code]) return;
   keys[e.code] = true; onKey(e);
 });
-addEventListener('keyup', (e) => { keys[e.code] = false; });
+addEventListener('keyup', (e) => {
+  keys[e.code] = false;
+  if (e.code === 'KeyR' && UI.wheelOpen && UI.wheelHold) { UI.wheel(false); G.lock(); }
+});
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
 function playing() { return G.phase === 'prep' || G.phase === 'hunt'; }
-function controllable() { return G.my && !G.my.caught && G.view === 'third' && playing(); }
+function active() { return playing() || G.phase === 'hub'; }
+function controllable() { return G.my && !G.my.caught && G.view === 'third' && active(); }
 function onKey(e) {
-  if (e.code === 'KeyT' && G.online && playing()) { e.preventDefault(); UI.openChat(); return; }
-  if (!playing() || G.paused) return;
+  if (e.code === 'KeyT' && G.online && active()) { e.preventDefault(); UI.openChat(); return; }
+  if (e.code === 'Tab' && G.phase === 'hub') { UI.hubPanel(!UI.panelOpen); return; }
+  if (!active() || G.paused) return;
   const P = G.my;
   if (e.code === 'KeyF' && controllable()) { togglePaint(); e.preventDefault(); return; }
   if (e.code === 'Enter' && G.phase === 'prep' && (G.view === 'third' || (G.party && G.view === 'first'))) { if (G.party || !G.online || G.isHost) G.finishPrep(); return; }
@@ -796,40 +1166,74 @@ function onKey(e) {
     if (e.code === 'KeyZ' && (e.ctrlKey || e.metaKey)) { undo(); e.preventDefault(); return; }
     if (e.code === 'Escape') togglePaint();
   }
+  if (G.view === 'first' && G.phase === 'hunt' && e.code === 'KeyE') { hunterPing(); return; }
   if (!controllable()) { if (G.view === 'spec' && /Digit[1-9]/.test(e.code)) G.specIdx = +e.code.slice(5) - 1; return; }
-  const poseKeys = { Digit1: 'stand', Digit2: 'crouch', Digit3: 'curl', Digit4: 'lie', Digit5: 'flat' };
-  if (poseKeys[e.code]) setPose(poseKeys[e.code]);
+  if (e.code === 'KeyR') { UI.wheel(!UI.wheelOpen, true); return; }
+  const pk = POSE_ORDER.find((k) => POSES[k].key && 'Digit' + POSES[k].key === e.code);
+  if (pk) setPose(pk);
   if (e.code === 'KeyZ' && !e.ctrlKey) P.setYaw(P.yaw + Math.PI / 12);
   if (e.code === 'KeyX') P.setYaw(P.yaw - Math.PI / 12);
+  if (G.phase === 'hub') { if (e.code === 'KeyG') { const em = pick(['wave', 'dance', 'cheer']); P.setEmote(em); } return; }
   if (e.code === 'KeyC') makeClone();
   if (e.code === 'KeyQ') taunt();
+  if (e.code === 'KeyV') decoy();
 }
-function setPose(p) { const P = G.my; if (!P) return; P.setPose(p); if (p === 'flat') snapToWall(P); UI.refreshBars(); }
+function setPose(p) {
+  const P = G.my; if (!P) return;
+  if (POSES[p]?.emote) { P.setEmote(p); return; }
+  P.setPose(p); if (POSES[p].wall) snapToWall(P); UI.refreshBars();
+}
 function emitAny(ev) { if (G.online) Net.relay({ k: 'ev', ev }); G.applyEvent(ev); }
 function makeClone() {
-  if (G.cloneLeft <= 0) { toast('No clones left'); return; }
+  if (G.ab.clones <= 0) { toast('No clones left'); return; }
   const P = G.my, p = P.root.position;
-  G.cloneLeft--; UI.refreshBars();
+  G.ab.clones--; UI.refreshBars();
   emitAny({ e: 'clone', id: 'cl' + uid(), owner: P.id, x: p.x, y: p.y, z: p.z, yaw: P.yaw, pose: P.pose });
   toast('Clone placed. Now sneak somewhere else!', 'good'); Sound.splat();
 }
 function taunt() {
   if (G.phase !== 'hunt') { toast('Taunts only count during the hunt'); return; }
-  if (G.tauntT > 0) return;
-  G.tauntT = 6; G.stats.taunts++;
+  if (G.ab.taunt > 0) return;
+  G.ab.taunt = AB.tauntCD; G.stats.taunts++;
   emitAny({ e: 'whistle', id: G.my.id, chance: 0.85 });
-  toast('+150 taunt bonus. They heard that…', 'warn');
+  toast('+20 XP taunt. They heard that…', 'warn');
 }
-renderer.domElement.addEventListener('click', () => {
+function decoy() {
+  if (G.phase !== 'hunt') { toast('Decoys work during the hunt'); return; }
+  if (G.ab.decoys <= 0) { toast('No decoys left'); return; }
+  const dir = new V3(); camera.getWorldDirection(dir);
+  const h = envHit(camera.position, dir, 16);
+  const p = h ? h.point.clone().addScaledVector(dir, -0.15) : camera.position.clone().addScaledVector(dir, 16);
+  p.y = Math.max(0.2, p.y);
+  G.ab.decoys--; UI.refreshBars();
+  emitAny({ e: 'decoy', x: p.x, y: p.y, z: p.z });
+  toast('Decoy thrown. Hunters will check it out.', 'good');
+}
+function hunterPing() {
+  if (G.ab.ping > 0 || !G.fp) return;
+  G.ab.ping = AB.pingCD;
+  const p = G.fp.pos;
+  emitAny({ e: 'ping', id: G.myHunter.id, x: p.x, y: p.y, z: p.z });
+}
+function shootPaint() {
+  if (G.ab.ammo < 1) { toast('Out of paintballs. They recharge.'); return; }
+  G.ab.ammo--; Sound.shoot();
+  const dir = new V3(); camera.getWorldDirection(dir);
+  const p = camera.position.clone().addScaledVector(dir, 0.5).add(new V3(0, -0.12, 0));
+  const v = dir.multiplyScalar(19).add(new V3(0, 1.2, 0));
+  spawnBall(p, v.clone(), true);
+  if (G.online) Net.relay({ k: 'ev', ev: { e: 'pb', by: G.myId, p: [p.x, p.y, p.z], v: [v.x, v.y, v.z] } });
+}
+renderer.domElement.addEventListener('mousedown', (e) => {
   Sound.init();
-  if (!playing() || G.paint) return;
+  if (!active() || G.paint || UI.wheelOpen || UI.panelOpen) return;
   if (!document.pointerLockElement) { G.lock(); return; }
-  if (G.view === 'first' && G.phase === 'hunt') bonk();
+  if (G.view === 'first' && G.phase === 'hunt') { if (e.button === 0) bonk(); else if (e.button === 2) shootPaint(); }
 });
 document.addEventListener('pointerlockchange', () => {
   const locked = !!document.pointerLockElement;
-  if (!locked && playing() && !G.paint && !UI.chatOpen) { G.paused = !G.online; UI.screen('pause'); }
-  if (locked) { G.paused = false; if (!$('#screen-pause').classList.contains('hidden')) UI.screen(null); }
+  if (!locked && active() && !G.paint && !UI.chatOpen && !UI.wheelOpen && !UI.panelOpen) { G.paused = !G.online && G.phase !== 'hub'; UI.pause(true); }
+  if (locked) { G.paused = false; UI.pause(false); }
 });
 addEventListener('mousemove', (e) => {
   mouse.x = e.clientX; mouse.y = e.clientY;
@@ -880,13 +1284,13 @@ function paintAt(e, first) {
   if (UI.curTool === 'mimic') {
     if (G.ink <= 0) { if (first) toast('Out of mimic ink. Use the brush and eyedropper.'); return; }
     const rpx = 6 + size * 1.4;
-    for (let k = 0; k < 14; k++) {
+    for (let k = 0; k < 16; k++) {
       const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * rpx;
       rcPaint.setFromCamera(evNdc(e.clientX + Math.cos(a) * r, e.clientY + Math.sin(a) * r), camera);
       const h1 = rcPaint.intersectObject(P.mesh, false)[0]; if (!h1) continue;
       const h2 = envHit(h1.point.clone().addScaledVector(rcPaint.ray.direction, 0.01), rcPaint.ray.direction, 40); if (!h2) continue;
       P.paintDot(h1.uv, surfaceColor(h2), 2.4 + size * 0.12);
-      G.ink = Math.max(0, G.ink - 0.012);
+      if (G.phase !== 'hub') G.ink = Math.max(0, G.ink - 0.012);
     }
     P.flush(); UI.refreshInk(); return;
   }
@@ -894,8 +1298,8 @@ function paintAt(e, first) {
   const h = rcPaint.intersectObject(P.mesh, false)[0];
   if (!h) { mouse.lastUV = null; return; }
   const uv = h.uv.clone();
-  if (mouse.lastUV && Math.abs(mouse.lastUV.x - uv.x) < 0.25 && Math.abs(mouse.lastUV.y - uv.y) < 0.25) {
-    const steps = Math.ceil(mouse.lastUV.distanceTo(uv) * TS / Math.max(1, size * 0.4));
+  if (mouse.lastUV && Math.abs(mouse.lastUV.x - uv.x) < 0.06 && Math.abs(mouse.lastUV.y - uv.y) < 0.06) {
+    const steps = Math.ceil(mouse.lastUV.distanceTo(uv) * TS / Math.max(1, size * PSCALE * 0.4));
     for (let i = 1; i <= steps; i++) P.paintDot(mouse.lastUV.clone().lerp(uv, i / steps), UI.color, size);
   } else P.paintDot(uv, UI.color, size);
   mouse.lastUV = uv;
@@ -905,7 +1309,8 @@ function paintAt(e, first) {
 function togglePaint() {
   if (!G.my) return;
   G.paint = !G.paint;
-  UI.paintPanel(G.paint);
+  if (G.paint) { G.my.setPose(G.my.pose === 'stand' || POSES[G.my.pose].move ? G.my.pose : G.my.pose); G.my.emote = null; G.my.rebake(); }
+  UI.paintPanel(G.paint); UI.wheel(false);
   if (G.paint) { G.paintCam.yaw = G.ctrl.yaw; G.paintCam.pitch = 0.15; G.paintCam.dist = 2.6; if (document.pointerLockElement) document.exitPointerLock(); }
   else G.lock();
 }
@@ -928,7 +1333,7 @@ function updateMyCham(dt) {
   const P = G.my;
   if (!P || P.caught) return;
   let moving = false;
-  if (!G.paint && !UI.chatOpen) {
+  if (!G.paint && !UI.chatOpen && !UI.wheelOpen && !UI.panelOpen && !G.paused) {
     let mx = 0, mz = 0;
     if (keys.KeyW) mz -= 1; if (keys.KeyS) mz += 1; if (keys.KeyA) mx -= 1; if (keys.KeyD) mx += 1;
     moving = !!(mx || mz);
@@ -936,12 +1341,14 @@ function updateMyCham(dt) {
     if (moving) {
       const y = G.ctrl.yaw, fx = -Math.sin(y), fz = -Math.cos(y), rx = Math.cos(y), rz = -Math.sin(y);
       let vx = fx * -mz + rx * mx, vz = fz * -mz + rz * mx; const l = Math.hypot(vx, vz); vx /= l; vz /= l;
-      const sp = (keys.ShiftLeft || keys.ShiftRight ? 1.6 : 4.2) * (P.pose === 'crouch' ? 0.55 : P.pose === 'curl' ? 0.8 : 1) * (P.size === 'petite' ? 0.85 : 1);
+      const sp = (keys.ShiftLeft || keys.ShiftRight ? 1.6 : 4.2) * (POSES[P.pose].speed || 1) * (P.size === 'petite' ? 0.85 : 1);
       P.root.position.x += vx * sp * dt; P.root.position.z += vz * sp * dt;
       P.setYaw(P.yaw + angDiff(P.yaw, Math.atan2(vx, vz)) * Math.min(1, dt * 12));
     }
-    if (keys.Space && P.body.onGround) { P.body.vy = 6.6; P.body.onGround = false; }
+    if (keys.Space && P.body.onGround && POSES[P.pose].move) { P.body.vy = 6.4; P.body.onGround = false; Sound.jump(); }
   }
+  const wasMoving = P.wasMoving; P.wasMoving = moving;
+  if (wasMoving && !moving) P.rebake();
   collideBody(P.body, dt, true);
   P.animate(dt, moving);
 }
@@ -986,23 +1393,21 @@ function updateCamera(dt) {
   }
   const P = G.my; if (!P) return;
   if (G.paint) thirdCam(P.center(), G.paintCam.yaw, G.paintCam.pitch, G.paintCam.dist, dt, true);
-  else { camTarget.copy(P.root.position); camTarget.y += Math.max(0.55, P.body.h * 0.9); thirdCam(camTarget, G.ctrl.yaw, G.ctrl.pitch, G.ctrl.dist, dt, false); }
+  else { camTarget.copy(P.root.position); camTarget.y += Math.max(0.5, Math.min(P.body.h, 1.3) * 0.95); thirdCam(camTarget, G.ctrl.yaw, G.ctrl.pitch, G.ctrl.dist, dt, false); }
 }
-let lastTickSec = -1, hudT = 0, menuT = 0;
+let lastTickSec = -1, hudT = 0;
 function update(dt) {
   G.t += dt;
   updateFx(dt);
   if (MAP && MAP.tick) MAP.tick(dt);
-  if (G.phase === 'menu' || G.phase === 'lobby') {
-    menuT += dt * 0.05;
-    const B = MAP.bounds, cx = (B.x0 + B.x1) / 2, cz = (B.z0 + B.z1) / 2;
-    camera.position.set(cx + Math.cos(menuT) * (B.x1 - B.x0) * 0.28, 2.4, cz + Math.sin(menuT) * (B.z1 - B.z0) * 0.25); camera.lookAt(cx, 1, cz);
-    return;
-  }
+  if (G.phase === 'menu' || G.phase === 'boot') { updateMenuScene(dt); return; }
+  if (G.phase === 'hub') { updateHub(dt); hudT -= dt; if (hudT <= 0) { hudT = 0.1; UI.hubTick(); } return; }
   if (G.phase === 'end') { if (G.reveal) G.updateReveal(dt); else updateCamera(dt); G.netTick(dt); return; }
   if (G.paused || !playing()) return;
   G.timer -= dt;
-  if (G.tauntT > 0) G.tauntT -= dt;
+  if (G.ab.taunt > 0) G.ab.taunt -= dt;
+  if (G.ab.ping > 0) G.ab.ping -= dt;
+  if (G.ab.ammo < AB.ammo) { G.ab.ammoT += dt; if (G.ab.ammoT >= AB.ammoRecharge) { G.ab.ammoT = 0; G.ab.ammo++; } } else G.ab.ammoT = 0;
   const sec = Math.ceil(G.timer);
   if (sec <= 10 && sec !== lastTickSec && sec > 0) { lastTickSec = sec; Sound.tick(); }
   if (G.view === 'first') updateFP(dt); else updateMyCham(dt);
@@ -1012,7 +1417,7 @@ function update(dt) {
       p.x = lerp(p.x, c.target.x, k); p.y = lerp(p.y, c.target.y, k); p.z = lerp(p.z, c.target.z, k);
       c.setYaw(c.yaw + angDiff(c.yaw, c.target.yaw) * k);
       c.animate(dt, !!c.remoteMoving);
-    }
+    } else if (!c.local) c.animate(dt, false);
     c.speed = c.lastPos ? c.root.position.distanceTo(c.lastPos) / Math.max(dt, 1e-4) : 0;
     c.lastPos = (c.lastPos || new V3()).copy(c.root.position);
   }
@@ -1044,324 +1449,29 @@ function step(dt) {
 let last = performance.now();
 function frame(now) { const dt = Math.min(0.05, (now - last) / 1000); last = now; step(dt); requestAnimationFrame(frame); }
 
-/* ================= UI ================= */
-function toast(msg, kind = '') {
-  const el = document.createElement('div'); el.className = 'toast ' + kind; el.textContent = msg;
-  $('#toasts').appendChild(el); setTimeout(() => el.remove(), 3000);
-  while ($('#toasts').children.length > 4) $('#toasts').firstChild.remove();
-}
-function seg(id, value, fn) {
-  const el = $(id); if (!el) return;
-  el.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.v === String(value)));
-  el.onclick = (e) => { const b = e.target.closest('button'); if (!b || b.disabled) return; el.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b)); Sound.click(); fn(b.dataset.v); };
-}
-function segHTML(opts) { return Object.entries(opts).map(([v, l]) => `<button data-v="${v}">${l}</button>`).join(''); }
-function mapCards(el, cur, fn, disabled = false) {
-  el.innerHTML = MAP_ORDER.map((id) => { const m = MAPS[id]; return `<button class="mapcard ${id === cur ? 'on' : ''}" data-v="${id}" ${disabled ? 'disabled' : ''} style="--c1:${m.colors[0]};--c2:${m.colors[1]}"><i></i><b>${m.name}</b><span>${m.desc}</span></button>`; }).join('');
-  el.onclick = (e) => { const b = e.target.closest('button'); if (!b || b.disabled) return; el.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b)); Sound.click(); fn(b.dataset.v); };
-}
-const UI = {
-  curTool: 'brush', color: '#7a4a2c', brush: 10, recent: [], chatOpen: false, charTab: 'cham',
-  screen(name) {
-    for (const s of $$('.screen')) s.classList.add('hidden');
-    if (name) $('#screen-' + name).classList.remove('hidden');
-    if (name === 'char') { Preview.start(); this.renderChar(); } else Preview.stop();
-    if (name === 'online') this.startBrowser(); else this.stopBrowser();
-  },
-  hud(on) { $('#hud').classList.toggle('hidden', !on); },
-  blind(on) { $('#blind').classList.toggle('hidden', !on); },
-  loading(on, txt) { if (on) { $('#loadTitle').textContent = txt; this.screen('load'); } else if (!$('#screen-load').classList.contains('hidden')) this.screen(null); },
-  hand(title, text) { $('#handTitle').textContent = title; $('#handText').textContent = text; this.screen('hand'); },
-  end(title, text, items, online) {
-    $('#endTitle').textContent = title; $('#endText').textContent = text;
-    $('#endList').innerHTML = items.map((i) => `<li><span>${esc(i.name)}</span><span class="${i.ok ? 'ok' : 'no'}">${i.txt}</span></li>`).join('');
-    $('#againBtn').textContent = online ? 'Back to lobby' : 'Play again';
-    $('#menuBtn').textContent = online ? 'Leave server' : 'Menu';
-    this.hud(false); this.screen('end');
-  },
-  paintPanel(on) {
-    $('#paintPanel').classList.toggle('hidden', !on);
-    document.body.classList.toggle('painting', !!on);
-    if (on && G.my) {
-      $('#rough').value = Math.round(G.my.mat.roughness * 100); $('#roughVal').textContent = G.my.mat.roughness.toFixed(2);
-      $('#metal').value = Math.round(G.my.mat.metalness * 100); $('#metalVal').textContent = G.my.mat.metalness.toFixed(2);
-      this.refreshInk(); this.refreshBars();
-    }
-  },
-  tool(t) { this.curTool = t; $$('[data-tool]').forEach((b) => b.classList.toggle('on', b.dataset.tool === t)); },
-  setColor(hex, addRecent) { this.color = hex; $('#color').value = hex; if (addRecent) { this.recent = [hex, ...this.recent.filter((c) => c !== hex)].slice(0, 14); $('#swatches').innerHTML = this.recent.map((c) => `<i style="background:${c}" data-c="${c}" title="${c}"></i>`).join(''); } },
-  setRough(r) { if (!G.my) return; G.my.mat.roughness = r; $('#rough').value = Math.round(r * 100); $('#roughVal').textContent = r.toFixed(2); },
-  refreshInk() { $('#inkBar').style.width = G.ink + '%'; },
-  refreshBars() {
-    const P = G.my;
-    $$('[data-pose]').forEach((b) => b.classList.toggle('on', !!P && b.dataset.pose === P.pose));
-    $$('#shapeSeg button').forEach((b) => b.classList.toggle('on', !!P && b.dataset.v === P.shape));
-    $$('#sizeSeg button').forEach((b) => b.classList.toggle('on', !!P && b.dataset.v === P.size));
-    $('#cloneLeft').textContent = `(${G.cloneLeft})`;
-    $('#posebar').classList.toggle('hidden', G.view !== 'third');
-    $('#crosshair').classList.toggle('hidden', G.view !== 'first');
-    $('#eyes').classList.toggle('hidden', !(G.phase === 'hunt' && P && !P.caught && G.hunters.some((h) => h.ai)));
-    $('#readyBtn').classList.toggle('hidden', !(G.phase === 'prep' && (!G.online || G.isHost)));
-  },
-  crossHot(on) { $('#crosshair').classList.toggle('hot', on); },
-  status() {
-    const real = G.realHiders();
-    const rows = real.map((c) => `<div class="${c.caught ? 'caught' : ''}"><span class="dot" style="background:${c.color}"></span>${esc(c.name)}${c === G.my ? ' (you)' : ''}</div>`).join('');
-    const hn = G.hunters.length;
-    $('#status').innerHTML = `<div class="st-h">Chameleons ${real.filter((c) => !c.caught).length}/${real.length}</div>${rows}<div class="st-h" style="margin-top:6px">${hn} hunter${hn === 1 ? '' : 's'}${G.P?.mode === 'infection' ? ' · Infection' : ''}</div>`;
-  },
-  tick() {
-    const t = Math.max(0, G.timer);
-    $('#timer').textContent = `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
-    $('#timer').classList.toggle('low', t < 10.5);
-    let phase = '', sub = '', hint = '';
-    const left = G.realHiders().filter((c) => !c.caught).length;
-    if (G.phase === 'prep') {
-      if (G.view === 'first') { phase = 'Hunters wait'; sub = 'The gate opens soon'; }
-      else { phase = G.party ? `${G.my?.name}: hide!` : 'Prep: paint & hide'; sub = 'Hunters are locked in'; }
-    } else if (G.phase === 'hunt') { phase = G.view === 'first' ? 'Hunt' : G.view === 'spec' ? 'Spectating' : 'Hunters are searching'; sub = `${left} chameleon${left === 1 ? '' : 's'} left · ${MAP.name}`; }
-    if (G.view === 'third') hint = G.paint ? 'Paint mode · Left-drag paint · Right-drag orbit · Alt+click sample · F to finish'
-      : 'WASD move · Space jump · Shift sneak · F paint · 1-5 pose · Z/X turn · C clone · Q taunt' + (G.phase === 'prep' ? ' · Enter ready' : '') + (G.online ? ' · T chat' : '');
-    else if (G.view === 'first') hint = 'WASD move · Click bonk · Space jump · Listen for whistles' + (G.online ? ' · T chat' : '');
-    else if (G.view === 'spec') { const hs = G.hunters.filter((h) => !h.local); hint = hs.length ? `Spectating ${hs[G.specIdx % hs.length].name} · 1-9 switch · mouse orbit` : ''; }
-    $('#phase').textContent = phase; $('#sub').textContent = sub; $('#hint').textContent = hint;
-    if (G.phase === 'hunt' && G.my) {
-      const s = clamp(G.playerSus || 0, 0, 1);
-      $('#eyesBar').style.width = (s * 100) + '%';
-      $('#eyesTxt').textContent = s < 0.05 ? 'unseen' : s < 0.35 ? 'glanced' : s < 1 ? 'suspicious!' : 'SPOTTED';
-    }
-    if (G.phase === 'prep' && G.view === 'first') $('#blindTime').textContent = Math.ceil(t);
-    this.refreshBars(); this.status();
-  },
-
-  /* --- chat --- */
-  openChat() {
-    if (this.chatOpen) return;
-    this.chatOpen = true;
-    if (document.pointerLockElement) document.exitPointerLock();
-    $('#gameChat').classList.remove('hidden'); $('#gameChatInput').value = ''; setTimeout(() => $('#gameChatInput').focus(), 0);
-  },
-  closeChat(send) {
-    const v = $('#gameChatInput').value.trim();
-    if (send && v) Net.send({ t: 'chat', text: v });
-    this.chatOpen = false; $('#gameChat').classList.add('hidden'); $('#gameChatInput').blur(); G.lock();
-  },
-  addChat(name, text, sys) {
-    G.lobby.chat.push({ name, text, sys }); if (G.lobby.chat.length > 80) G.lobby.chat.shift();
-    const log = $('#chatLog');
-    log.innerHTML = G.lobby.chat.map((m) => m.sys ? `<div class="sys">${esc(m.text)}</div>` : `<div><b>${esc(m.name)}</b> ${esc(m.text)}</div>`).join('');
-    log.scrollTop = log.scrollHeight;
-    if (playing() || G.phase === 'end') { const el = document.createElement('div'); el.className = 'chatline'; el.innerHTML = sys ? esc(text) : `<b>${esc(name)}</b> ${esc(text)}`; $('#chatFeed').appendChild(el); setTimeout(() => el.remove(), 8000); }
-    if (!sys) Sound.chat();
-  },
-
-  /* --- character screen --- */
-  renderChar() {
-    $('#nameInput').value = PROFILE.name;
-    $$('#charTabs button').forEach((b) => b.classList.toggle('on', b.dataset.v === this.charTab));
-    const box = $('#charOpts');
-    const chips = (label, opts, cur, key) => `<div class="optgroup"><span>${label}</span><div class="chips" data-key="${key}">${Object.entries(opts).map(([v, l]) => `<button data-v="${v}" class="${v === cur ? 'on' : ''}">${l}</button>`).join('')}</div></div>`;
-    const swatches = (label, cols, cur, key) => `<div class="optgroup"><span>${label}</span><div class="chips sw" data-key="${key}">${cols.map((c) => `<button data-v="${c}" class="${c === cur ? 'on' : ''}" style="background:${c}"></button>`).join('')}</div></div>`;
-    if (this.charTab === 'cham') {
-      box.innerHTML = chips('Body', Object.fromEntries(Object.entries(SHAPES).map(([k, s]) => [k, s.label])), PROFILE.cham.shape, 'cham.shape')
-        + chips('Face', EYES, PROFILE.cham.eyes, 'cham.eyes') + swatches('Name tag colour', TAG_COLORS, PROFILE.tag, 'tag')
-        + '<p class="note">Every chameleon starts pure white. Your face disappears once you paint over it.</p>';
-      Preview.showCham(PROFILE.cham.shape, PROFILE.cham.eyes);
-    } else {
-      box.innerHTML = swatches('Suit colour', HUNTER_COLORS, PROFILE.hunter.color, 'hunter.color') + chips('Hat', HATS, PROFILE.hunter.hat, 'hunter.hat') + chips('Face', VISORS, PROFILE.hunter.visor, 'hunter.visor') + chips('Weapon', TOOLS, PROFILE.hunter.tool, 'hunter.tool');
-      Preview.showHunter(PROFILE.hunter);
-    }
-    box.onclick = (e) => {
-      const b = e.target.closest('button'); if (!b) return;
-      const key = b.parentElement.dataset.key.split('.');
-      if (key.length === 2) PROFILE[key[0]][key[1]] = b.dataset.v; else PROFILE[key[0]] = b.dataset.v;
-      saveProfile(); Sound.click(); this.renderChar();
-      if (G.online) Net.send({ t: 'profile', name: PROFILE.name, profile: PROFILE });
-    };
-  },
-
-  /* --- server browser --- */
-  browserTimer: null,
-  startBrowser() {
-    this.stopBrowser();
-    const run = async () => {
-      const rows = [];
-      if (window.mcNative) { for (const s of await mcNative.lanList()) rows.push({ ...s, src: 'LAN' }); }
-      const favs = JSON.parse(localStorage.getItem('mc_servers') || '[]');
-      const infos = await Promise.all(favs.map((a) => fetchInfo(a)));
-      favs.forEach((a, i) => { const inf = infos[i]; const [h, p] = Net.normalize(a).split(':'); if (!rows.some((r) => r.host === h && +r.port === +p)) rows.push(inf ? { ...inf, src: 'Saved' } : { name: a, host: h, port: +p, src: 'Saved', offline: true }); });
-      if (!$('#screen-online').classList.contains('hidden')) this.renderServers(rows);
-    };
-    run(); this.browserTimer = setInterval(run, 2500);
-    $('#hostNote').textContent = window.mcNative ? '' : 'Hosting needs the desktop app. You can still join by address.';
-    $('#hostBtn').disabled = !window.mcNative;
-  },
-  stopBrowser() { clearInterval(this.browserTimer); this.browserTimer = null; },
-  renderServers(rows) {
-    const el = $('#serverList');
-    if (!rows.length) { el.innerHTML = '<div class="empty">No servers found on your network yet. Host one, or join by address.</div>'; return; }
-    el.innerHTML = rows.map((r) => `<div class="srv ${r.offline ? 'off' : ''}" data-addr="${r.host}:${r.port}" data-locked="${r.locked ? 1 : 0}">
-      <div><b>${esc(r.name)}</b><span>${r.src} · ${r.host}:${r.port}${r.locked ? ' · locked' : ''}</span></div>
-      <div class="meta">${r.offline ? 'offline' : `${MAPS[r.map]?.name || r.map} · ${r.mode === 'infection' ? 'Infection' : 'Classic'}${r.inGame ? ' · in game' : ''}`}</div>
-      <div class="cnt">${r.offline ? '-' : `${r.players}/${r.max}`}</div>
-      <button class="primary" ${r.offline ? 'disabled' : ''}>Join</button></div>`).join('');
-    el.onclick = (e) => { const row = e.target.closest('.srv'); if (!row || !e.target.closest('button')) return; joinServer(row.dataset.addr, row.dataset.locked === '1'); };
-  },
-
-  /* --- lobby --- */
-  renderLobby() {
-    const L = G.lobby, host = Net.isHost, s = L.settings;
-    $('#lobbyTitle').textContent = Net.server?.name || 'Lobby';
-    $('#lobbyPlayers').innerHTML = [...L.players.values()].map((p) => `<div class="lp"><span class="dot" style="background:${p.profile?.tag || '#fff'}"></span><b>${esc(p.name)}</b>${p.id === Net.hostId ? '<em>host</em>' : ''}${p.id === Net.id ? '<em class="you">you</em>' : ''}${host && p.id !== Net.id ? `<button class="kick" data-id="${p.id}">Kick</button>` : ''}</div>`).join('');
-    $('#lobbyPlayers').onclick = (e) => { const b = e.target.closest('.kick'); if (b) Net.send({ t: 'kick', id: b.dataset.id }); };
-    mapCards($('#lobbyMaps'), s.map, (v) => { s.map = v; pushLobby(); }, !host);
-    const segs = [['#lsMode', 'mode'], ['#lsHunters', 'hunters'], ['#lsAiHunters', 'aiHunters'], ['#lsAiHiders', 'aiHiders'], ['#lsPrep', 'prep'], ['#lsHunt', 'hunt'], ['#lsDiff', 'diff']];
-    for (const [id, k] of segs) { seg(id, s[k], (v) => { s[k] = isNaN(+v) ? v : +v; pushLobby(); }); $$(id + ' button').forEach((b) => (b.disabled = !host)); }
-    $('#lobbyStart').classList.toggle('hidden', !host);
-    $('#lobbyWait').classList.toggle('hidden', host);
-    $('#lobbyWait').textContent = L.inGame ? 'A round is in progress. You will join the next one.' : 'Waiting for the host to start…';
-    $('#lobbyShare').innerHTML = host && this.hostIPs ? 'Friends join with: ' + this.hostIPs.map((i) => `<code>${i.address}:${this.hostPort}</code>${i.tailscale ? ' (Tailscale)' : ''}`).join(' · ') : '';
-  },
+/* ================= map thumbnails (rendered once at boot) ================= */
+const THUMB_CAM = {
+  mansion: [9.5, 1.7, 13.5, 4, 1.0, 6],
+  backrooms: [15, 1.6, 13.5, 8, 1.2, 6],
+  sewer: [2, 1.8, 14.2, 14, 1.0, 10.5],
+  sugar: [12, 2.4, 27, 21, 1.2, 16],
+  gallery: [11, 1.7, 12.5, 20, 1.4, 3],
 };
-function pushLobby() { Net.send({ t: 'lobby', lobby: { settings: G.lobby.settings, map: G.lobby.settings.map, mode: G.lobby.settings.mode } }); UI.renderLobby(); }
-
-/* ---------- online flows ---------- */
-async function joinServer(addr, locked, password) {
-  if (locked && password == null) { const pw = prompt('Server password'); if (pw == null) return; password = pw; }
-  UI.loading(true, 'Connecting to ' + addr + '…');
-  try {
-    const w = await Net.connect(addr, password || '');
-    enterLobby(w);
-    const favs = JSON.parse(localStorage.getItem('mc_servers') || '[]'); const a = Net.normalize(addr);
-    if (!favs.includes(a) && !/^127\.|^localhost/.test(a)) { favs.unshift(a); localStorage.setItem('mc_servers', JSON.stringify(favs.slice(0, 12))); }
-  } catch (e) { UI.loading(false); UI.screen('online'); toast(e.message, 'bad'); }
+const THUMBS = {};
+async function makeThumbs() {
+  const W = 400, H = 225, rt = new THREE.WebGLRenderTarget(W, H), buf = new Uint8Array(W * H * 4);
+  const cam = new THREE.PerspectiveCamera(62, W / H, 0.05, 160);
+  const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d'); const img = g.createImageData(W, H);
+  for (const id of MAP_ORDER) {
+    await nextFrame();
+    loadMap(id);
+    const t = THUMB_CAM[id] || [MAP.playerSpawn[0], 1.7, MAP.playerSpawn[1], MAP.bounds.x1 / 2, 1, MAP.bounds.z1 / 2];
+    cam.position.set(t[0], t[1], t[2]); cam.lookAt(t[3], t[4], t[5]);
+    renderer.shadowMap.needsUpdate = true;
+    renderer.setRenderTarget(rt); renderer.render(scene, cam); renderer.readRenderTargetPixels(rt, 0, 0, W, H, buf); renderer.setRenderTarget(null);
+    for (let y = 0; y < H; y++) img.data.set(buf.subarray((H - 1 - y) * W * 4, (H - y) * W * 4), y * W * 4);
+    g.putImageData(img, 0, 0);
+    THUMBS[id] = c.toDataURL('image/jpeg', 0.85);
+  }
+  rt.dispose();
 }
-function enterLobby(w) {
-  Sound.init();
-  G.online = true; G.myId = Net.id; G.isHost = Net.isHost; G.party = null;
-  const L = G.lobby; L.players = new Map(w.players.map((p) => [p.id, p])); L.chat = []; L.inGame = !!w.lobby.inGame;
-  if (w.lobby.settings && Object.keys(w.lobby.settings).length) L.settings = { ...L.settings, ...w.lobby.settings };
-  if (Net.isHost) pushLobby();
-  G.clearRound(); G.phase = 'lobby'; UI.hud(false); UI.loading(false); UI.screen('lobby'); UI.renderLobby();
-  UI.addChat('', `Connected to ${Net.server?.name || 'server'}.`, true);
-}
-function backToLobby() {
-  G.clearRound(); G.phase = 'lobby'; G.isHost = Net.isHost; UI.hud(false); UI.screen('lobby'); UI.renderLobby();
-  if (document.pointerLockElement) document.exitPointerLock();
-}
-Net.on('join', (m) => { G.lobby.players.set(m.player.id, m.player); UI.addChat('', `${m.player.name} joined.`, true); if (G.phase === 'lobby') UI.renderLobby(); });
-Net.on('leave', (m) => {
-  const p = G.lobby.players.get(m.id); G.lobby.players.delete(m.id);
-  if (p) UI.addChat('', `${p.name} left.`, true);
-  const c = G.findCham(m.id); if (c && !c.caught) { c.caught = true; c.root.visible = false; }
-  const h = G.findHunter(m.id) || G.findHunter(m.id + '_h'); if (h) { h.dispose(); G.hunters = G.hunters.filter((x) => x !== h); }
-  if (G.isHost && G.phase === 'hunt' && !G.realHiders().some((x) => !x.caught)) G.hostEnd();
-  if (G.phase === 'lobby') UI.renderLobby();
-});
-Net.on('host', () => {
-  G.isHost = Net.isHost; G.lobby.inGame = false;
-  UI.addChat('', Net.isHost ? 'You are now the host.' : 'The host changed.', true);
-  if (playing() || G.phase === 'end') { toast('Host left. Back to the lobby.', 'warn'); backToLobby(); }
-  else if (G.phase === 'lobby') UI.renderLobby();
-});
-Net.on('lobby', (m) => { G.lobby.settings = { ...G.lobby.settings, ...(m.lobby.settings || {}) }; G.lobby.inGame = !!m.lobby.inGame; if (G.phase === 'lobby') UI.renderLobby(); });
-Net.on('profile', (m) => { const p = G.lobby.players.get(m.id); if (p) { p.name = m.name; p.profile = m.profile; } if (G.phase === 'lobby') UI.renderLobby(); });
-Net.on('chat', (m) => UI.addChat(m.name, m.text));
-Net.on('relay', (m) => G.onRelay(m.from, m.d));
-Net.on('closed', () => { toast('Disconnected from server.', 'bad'); G.online = false; G.clearRound(); G.phase = 'menu'; UI.hud(false); UI.screen('online'); });
-
-async function hostServer() {
-  const opts = { name: $('#hName').value || `${PROFILE.name}'s server`, port: +$('#hPort').value || 7777, password: $('#hPass').value, max: +$('#hMax').value || 12 };
-  UI.loading(true, 'Starting server…');
-  const r = await mcNative.hostStart(opts);
-  if (!r.ok) { UI.loading(false); UI.screen('online'); toast(r.error, 'bad'); return; }
-  const rank = (a) => (a.startsWith('192.168.56.') || a.startsWith('172.') ? 0 : a.startsWith('100.') ? 1 : 2);
-  UI.hostIPs = r.ips.filter((i) => rank(i.address) > 0).sort((a, b) => rank(b.address) - rank(a.address)); UI.hostPort = r.port;
-  try { const w = await Net.connect('127.0.0.1:' + r.port, opts.password); enterLobby(w); }
-  catch (e) { UI.loading(false); UI.screen('online'); toast(e.message, 'bad'); }
-}
-
-/* ---------- wiring ---------- */
-G.partyCfg = { humans: 2, ai: 1, map: 'mansion', diff: 'normal' };
-function wire() {
-  $('#mPlay').onclick = () => { UI.screen('solo'); renderSolo(); };
-  $('#mParty').onclick = () => { UI.screen('party'); renderParty(); };
-  $('#mOnline').onclick = () => UI.screen('online');
-  $('#mChar').onclick = () => { UI.returnTo = null; UI.screen('char'); };
-  $('#mSettings').onclick = () => { UI.screen('settings'); renderSettings(); };
-  $('#mQuit').onclick = () => (window.mcNative ? mcNative.quit() : window.close());
-  $('#mQuit').classList.toggle('hidden', !window.mcNative);
-  $$('.back').forEach((b) => (b.onclick = () => { Sound.click(); UI.screen('menu'); }));
-  $('#soloStart').onclick = () => G.startSolo();
-  $('#partyStart').onclick = () => G.startParty(G.partyCfg.humans, G.partyCfg.ai, G.partyCfg.map, G.partyCfg.diff);
-  $('#handGo').onclick = () => G.handGo();
-  $('#againBtn').onclick = () => { if (G.online) backToLobby(); else if (G.party) G.startParty(G.partyCfg.humans, G.partyCfg.ai, G.partyCfg.map, G.partyCfg.diff); else G.startSolo(); };
-  $('#menuBtn').onclick = () => G.toMenu();
-  $('#revealBtn').onclick = () => G.startReveal();
-  $('#resumeBtn').onclick = () => { G.paused = false; UI.screen(null); G.lock(); };
-  $('#quitBtn').onclick = () => { G.paused = false; G.toMenu(); };
-  $('#paintDone').onclick = () => togglePaint();
-  $$('[data-tool]').forEach((b) => (b.onclick = () => UI.tool(b.dataset.tool)));
-  $('#color').oninput = (e) => UI.setColor(e.target.value, false);
-  $('#color').onchange = (e) => UI.setColor(e.target.value, true);
-  $('#swatches').onclick = (e) => { if (e.target.dataset.c) UI.setColor(e.target.dataset.c, false); };
-  $('#brushSize').oninput = (e) => { UI.brush = +e.target.value; $('#sizeVal').textContent = UI.brush; };
-  $('#rough').oninput = (e) => UI.setRough(+e.target.value / 100);
-  $('#metal').oninput = (e) => { if (!G.my) return; G.my.mat.metalness = +e.target.value / 100; $('#metalVal').textContent = G.my.mat.metalness.toFixed(2); };
-  $('#undoBtn').onclick = undo;
-  $('#clearBtn').onclick = () => { if (!G.my) return; pushUndo(); G.my.blank(); };
-  $('#shapeSeg').innerHTML = segHTML(Object.fromEntries(Object.entries(SHAPES).map(([k, s]) => [k, s.label])));
-  $('#shapeSeg').onclick = (e) => { const b = e.target.closest('button'); if (b && G.my) { G.my.setShape(b.dataset.v); UI.refreshBars(); } };
-  $('#sizeSeg').onclick = (e) => { const b = e.target.closest('button'); if (b && G.my) { G.my.setSize(b.dataset.v); UI.refreshBars(); } };
-  $('#rotL').onclick = () => G.my?.setYaw(G.my.yaw + Math.PI / 12);
-  $('#rotR').onclick = () => G.my?.setYaw(G.my.yaw - Math.PI / 12);
-  $$('[data-pose]').forEach((b) => (b.onclick = () => { if (controllable()) setPose(b.dataset.pose); }));
-  $('[data-act="paint"]').onclick = () => { if (controllable()) togglePaint(); };
-  $('[data-act="clone"]').onclick = () => { if (controllable()) makeClone(); };
-  $('[data-act="taunt"]').onclick = () => { if (controllable()) taunt(); };
-  $('#readyBtn').onclick = () => { if (G.phase === 'prep') G.finishPrep(); };
-  $('#charTabs').onclick = (e) => { const b = e.target.closest('button'); if (!b) return; UI.charTab = b.dataset.v; Sound.click(); UI.renderChar(); };
-  $('#nameInput').onchange = (e) => { PROFILE.name = (e.target.value.trim() || PROFILE.name).slice(0, 20); saveProfile(); if (G.online) Net.send({ t: 'profile', name: PROFILE.name, profile: PROFILE }); };
-  $('#randomChar').onclick = () => { PROFILE.cham = { shape: pick(Object.keys(SHAPES)), eyes: pick(Object.keys(EYES)) }; PROFILE.hunter = { color: pick(HUNTER_COLORS), hat: pick(Object.keys(HATS)), visor: pick(Object.keys(VISORS)), tool: pick(Object.keys(TOOLS)) }; PROFILE.tag = pick(TAG_COLORS); saveProfile(); UI.renderChar(); };
-  $('#refreshBtn').onclick = () => UI.startBrowser();
-  $('#connectBtn').onclick = () => joinServer($('#addrInput').value, false, $('#addrPass').value);
-  $('#hostBtn').onclick = () => { $('#hostForm').classList.toggle('hidden'); if (!$('#hName').value) $('#hName').value = `${PROFILE.name}'s server`; };
-  $('#hostGo').onclick = hostServer;
-  $('#lobbyStart').onclick = () => G.hostStartOnline();
-  $('#lobbyLeave').onclick = () => G.toMenu();
-  $('#lobbyChar').onclick = () => { UI.returnTo = 'lobby'; UI.screen('char'); };
-  $('#charBack').onclick = () => { if (UI.returnTo === 'lobby' && G.phase === 'lobby') { UI.returnTo = null; UI.screen('lobby'); UI.renderLobby(); } else UI.screen('menu'); };
-  $('#chatInput').onkeydown = (e) => { if (e.key === 'Enter' && e.target.value.trim()) { Net.send({ t: 'chat', text: e.target.value.trim() }); e.target.value = ''; } };
-  $('#gameChatInput').onkeydown = (e) => { if (e.key === 'Enter') UI.closeChat(true); if (e.key === 'Escape') UI.closeChat(false); e.stopPropagation(); };
-  $('#lsHunters').innerHTML = segHTML({ 1: '1', 2: '2', 3: '3' }); $('#lsAiHunters').innerHTML = segHTML({ 0: '0', 1: '1', 2: '2', 3: '3' }); $('#lsAiHiders').innerHTML = segHTML({ 0: '0', 1: '1', 2: '2', 3: '3', 4: '4' });
-  $('#lsPrep').innerHTML = segHTML({ 45: '45s', 60: '60s', 90: '90s' }); $('#lsHunt').innerHTML = segHTML({ 120: '2m', 180: '3m', 240: '4m', 300: '5m' });
-  $('#lsMode').innerHTML = segHTML({ classic: 'Classic', infection: 'Infection' }); $('#lsDiff').innerHTML = segHTML({ easy: 'Easy', normal: 'Normal', hard: 'Hard' });
-  UI.setColor('#7a4a2c', true);
-}
-function renderSolo() {
-  const s = G.solo;
-  seg('#soloKind', s.kind, (v) => { s.kind = v; renderSolo(); });
-  seg('#soloDiff', s.diff, (v) => { s.diff = v; });
-  $('#soloDesc').textContent = { hide: 'You are a chameleon. Paint yourself, pose, and survive the AI hunters with your AI teammates.', seek: 'You are the hunter. AI chameleons have painted themselves somewhere. Bonk them all before time runs out.', infection: 'Start as a chameleon against one hunter. Everyone who gets caught turns into a hunter, you included. Be the last one standing.' }[s.kind];
-  mapCards($('#soloMaps'), s.map, (v) => { s.map = v; });
-}
-function renderParty() {
-  const p = G.partyCfg;
-  seg('#partyHumans', p.humans, (v) => { p.humans = +v; }); seg('#partyAI', p.ai, (v) => { p.ai = +v; }); seg('#partyDiff', p.diff, (v) => { p.diff = v; });
-  mapCards($('#partyMaps'), p.map, (v) => { p.map = v; });
-}
-function renderSettings() {
-  const S = SETTINGS;
-  const apply = () => { saveSettings(); camera.fov = S.fov; camera.updateProjectionMatrix(); Sound.setVolume(S.vol); };
-  const bind = (id, key, fmt) => { const el = $(id); el.value = S[key]; $(id + 'Val').textContent = fmt(S[key]); el.oninput = () => { S[key] = Number(el.value); $(id + 'Val').textContent = fmt(S[key]); apply(); }; };
-  bind('#setSens', 'sens', (v) => (+v).toFixed(2)); bind('#setVol', 'vol', (v) => Math.round(v * 100) + '%'); bind('#setFov', 'fov', (v) => v + '°');
-  seg('#setQuality', S.quality, (v) => { S.quality = v; saveSettings(); applyQuality(); });
-  seg('#setInvert', S.invertY ? 'on' : 'off', (v) => { S.invertY = v === 'on'; saveSettings(); });
-  $('#fsBtn').onclick = () => (window.mcNative ? mcNative.fullscreen() : document.documentElement.requestFullscreen?.());
-}
-
-wire();
-loadMap('mansion');
-UI.screen('menu');
-window.__mc = { G, scene, camera, renderer, autoCamo, Cham, Hunter, findSpot, env, colliders, bonk, togglePaint, paintAt, UI, Net, loadMap, step: (dt, n = 1) => { for (let i = 0; i < n; i++) step(dt); } };
-requestAnimationFrame(frame);
