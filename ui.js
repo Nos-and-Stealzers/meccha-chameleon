@@ -27,6 +27,7 @@ const ICON = {
 };
 const ico = (k, cls = '') => `<svg class="ico ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${ICON[k] || ''}</svg>`;
 
+const WIN_DOWNLOAD = 'https://github.com/Nos-and-Stealzers/meccha-chameleon/releases/latest/download/MecchaChameleon-Windows.zip';
 const TIPS = [
   'Lie face down on a rug and paint your back like the rug pattern.',
   'The Mimic brush paints whatever is behind you from the camera angle. Line the camera up with where hunters will look from.',
@@ -618,13 +619,20 @@ function wire() {
   $('#playBtn').onclick = () => { if (!$('#playBtn').classList.contains('searching')) UI.play(); };
   $('#srvFilter').onclick = (e) => { const b = e.target.closest('button'); if (!b) return; $$('#srvFilter button').forEach((x) => x.classList.toggle('on', x === b)); UI.srvFilter = b.dataset.v; UI.renderServers(); };
   $('#refreshBtn').onclick = () => { UI.publicRows = UI.publicRows || []; UI.startBrowser(); };
-  $('#connectBtn').onclick = () => joinServer($('#addrInput').value, false, $('#addrPass').value);
+  $('#connectBtn').onclick = () => { if (!window.mcNative && location.protocol === 'https:' && !/^wss:/i.test($('#addrInput').value.trim())) { toast('Browsers can only join wss:// addresses. Use the public servers or the Windows app.', 'warn'); return; } joinServer($('#addrInput').value, false, $('#addrPass').value); };
   $('#addrInput').onkeydown = (e) => { if (e.key === 'Enter') $('#connectBtn').click(); };
   $('#hostBtn').onclick = () => {
     if (!window.mcNative) { toast('Hosting needs the desktop app.', 'warn'); return; }
     if (!$('#hName').value) $('#hName').value = `${PROFILE.name}'s server`;
     $('#screen-host').classList.remove('hidden');
   };
+  $('#managerBtn').classList.toggle('hidden', !window.mcNative);
+  $('#hostBtn').classList.toggle('hidden', !window.mcNative);
+  if (!window.mcNative) {
+    $('#addrInput').placeholder = 'Direct connect needs the Windows app (browsers block ws:// on https pages)';
+    const v = $('.version'); v.innerHTML = esc(v.textContent) + ' · <a href="' + WIN_DOWNLOAD + '" target="_blank" rel="noopener" style="color:var(--accent);pointer-events:auto">Get the Windows app</a> for LAN, hosting and the Server Manager';
+  }
+  $('#managerBtn').onclick = () => { mcNative.openManager(); toast('Server Manager opened. It runs your dedicated servers (2 by default).', 'good'); };
   $('#hostCancel').onclick = () => $('#screen-host').classList.add('hidden');
   $('#hostGo').onclick = () => { $('#screen-host').classList.add('hidden'); hostServer(); };
   // locker

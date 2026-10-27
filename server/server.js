@@ -112,7 +112,7 @@ function start(opts = {}) {
     httpServer.listen(cfg.port, '0.0.0.0', () => {
       cfg.log(`"${cfg.name}" listening on port ${cfg.port}`);
       resolve({
-        port: cfg.port, name: cfg.name, ips: lanIPs(),
+        port: cfg.port, name: cfg.name, ips: lanIPs(), info,
         stop() { clearInterval(beaconTimer); try { beacon.close(); } catch {} for (const p of players.values()) try { p.ws.close(); } catch {} wss.close(); httpServer.close(); },
       });
     });
