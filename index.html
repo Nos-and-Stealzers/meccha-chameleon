@@ -8,37 +8,226 @@
 </head>
 <body class="in-menu">
 <div id="app"></div>
+<div id="vignette"></div>
 
-<!-- ============ always-on overlay ============ -->
+<!-- ================= persistent overlay ================= -->
 <div id="overlay">
   <div id="toasts"></div>
   <div id="chatFeed"></div>
-  <div id="gameChat" class="hidden"><input id="gameChatInput" maxlength="200" placeholder="Say something… Enter to send, Esc to cancel"></div>
+  <div id="gameChat" class="hidden"><span class="chlabel">All</span><input id="gameChatInput" maxlength="200" placeholder="Press Enter to send, Esc to cancel"></div>
 </div>
 
-<!-- ============ in-round HUD ============ -->
+<!-- ================= MENU SHELL (top bar shared by Play / Servers / Locker / Career) ================= -->
+<div id="shell" class="hidden">
+  <header id="topbarNav">
+    <div class="brand"><span class="b1">MECCHA</span><span class="b2">CHAMELEON</span></div>
+    <nav class="tabs" id="navTabs">
+      <button data-page="home" class="on">Play</button>
+      <button data-page="servers">Servers</button>
+      <button data-page="locker">Locker</button>
+      <button data-page="career">Career</button>
+    </nav>
+    <div class="right">
+      <div class="pchip" id="pchip" title="Career">
+        <div class="lvring" id="pcRing"><span id="pcLevel">1</span></div>
+        <div class="pctext"><b id="pcName">Player</b><div class="xpbar"><i id="pcXpBar"></i></div></div>
+      </div>
+      <button class="iconbtn" id="navSettings" title="Settings" data-ico="gear"></button>
+      <button class="iconbtn" id="navQuit" title="Quit" data-ico="power"></button>
+    </div>
+  </header>
+
+  <!-- HOME -->
+  <section class="page" id="page-home">
+    <div class="home-left">
+      <div class="news glass">
+        <span class="eyebrow">What's new</span>
+        <h3>Public servers are live</h3>
+        <p>Four always-on rooms, up to 15 players each. Pick <b>Quick match</b> and hit Play.</p>
+      </div>
+      <div class="tip glass"><span class="eyebrow">Tip</span><p id="tipText"></p></div>
+    </div>
+    <div class="home-right">
+      <button class="playlist glass" id="playlistCard">
+        <i class="pthumb" id="plThumb"></i>
+        <div class="ptext"><span class="eyebrow" id="plKind">Solo</span><b id="plName">Hide</b><small id="plSub">Hide-and-Seek Mansion · Normal</small></div>
+        <span class="change">Change</span>
+      </button>
+      <button class="playbtn" id="playBtn"><span>Play</span><kbd>Enter</kbd></button>
+    </div>
+    <div class="version">v3.1 · fan-made tribute to MECCHA CHAMELEON</div>
+  </section>
+
+  <!-- MODE SELECT -->
+  <section class="page" id="page-modes">
+    <div class="pagehead"><button class="backbtn" data-back="home" data-ico="back">Back</button><h1>Select mode</h1></div>
+    <div class="modegrid" id="modeGrid"></div>
+    <div class="modeopts" id="modeOpts">
+      <div class="optrow" id="optMapRow"><span class="eyebrow">Map</span><div class="maprow" id="modeMaps"></div></div>
+      <div class="optline">
+        <div class="optrow" id="optDiffRow"><span class="eyebrow">AI difficulty</span><div class="seg" id="modeDiff"><button data-v="easy">Easy</button><button data-v="normal">Normal</button><button data-v="hard">Hard</button></div></div>
+        <div class="optrow hidden" id="optPartyRow"><span class="eyebrow">Hiders on this PC</span><div class="seg" id="partyHumans"><button data-v="1">1</button><button data-v="2">2</button><button data-v="3">3</button><button data-v="4">4</button></div></div>
+        <div class="optrow hidden" id="optPartyAiRow"><span class="eyebrow">AI hiders</span><div class="seg" id="partyAI"><button data-v="0">0</button><button data-v="1">1</button><button data-v="2">2</button><button data-v="3">3</button></div></div>
+      </div>
+    </div>
+    <div class="pagefoot"><span class="muted" id="modeHelp"></span><button class="cta" id="modeConfirm">Select</button></div>
+  </section>
+
+  <!-- SERVERS -->
+  <section class="page" id="page-servers">
+    <div class="pagehead"><h1>Servers</h1>
+      <div class="seg filters" id="srvFilter"><button data-v="all" class="on">All</button><button data-v="public">Public</button><button data-v="lan">LAN</button><button data-v="saved">Saved</button></div>
+      <button class="ghostbtn" id="refreshBtn" data-ico="refresh">Refresh</button>
+    </div>
+    <div class="srvwrap">
+      <div class="srvtable glass">
+        <div class="srvhead"><span></span><span>Server</span><span>Map</span><span>Mode</span><span>Status</span><span class="r">Players</span></div>
+        <div id="serverList" class="serverlist"></div>
+      </div>
+      <aside class="srvdetail glass" id="srvDetail">
+        <div class="empty">Select a server to see details.</div>
+      </aside>
+    </div>
+    <div class="srvbottom">
+      <div class="joinrow glass">
+        <input id="addrInput" placeholder="Direct connect: 192.168.1.20:7777">
+        <input id="addrPass" type="password" placeholder="Password">
+        <button class="secbtn" id="connectBtn">Connect</button>
+      </div>
+      <button class="secbtn" id="hostBtn" data-ico="server">Host a server</button>
+    </div>
+  </section>
+
+  <!-- LOCKER -->
+  <section class="page" id="page-locker">
+    <div class="locker">
+      <aside class="slots glass">
+        <label class="namefield"><span class="eyebrow">Display name</span><input id="nameInput" maxlength="20"></label>
+        <span class="eyebrow">Chameleon</span>
+        <div id="slotsCham" class="slotlist"></div>
+        <span class="eyebrow">Hunter</span>
+        <div id="slotsHunter" class="slotlist"></div>
+        <button class="ghostbtn" id="randomChar" data-ico="dice">Randomise</button>
+      </aside>
+      <div class="lockerstage"><canvas id="previewCanvas"></canvas><div class="stagehint">Drag to rotate</div></div>
+      <section class="items glass">
+        <div class="itemshead"><h2 id="itemsTitle">Body</h2><span class="muted" id="itemsSub"></span></div>
+        <div class="itemgrid" id="itemGrid"></div>
+      </section>
+    </div>
+  </section>
+
+  <!-- CAREER -->
+  <section class="page" id="page-career">
+    <div class="career">
+      <div class="levelbanner glass">
+        <div class="biglv"><span>Level</span><b id="carLevel">1</b></div>
+        <div class="lvinfo"><div class="xpbar big"><i id="carXpBar"></i></div><span id="carXpTxt"></span></div>
+      </div>
+      <h2 class="sect">Stats</h2>
+      <div class="statgrid" id="statGrid"></div>
+      <h2 class="sect">Reward track</h2>
+      <div class="track" id="rewardTrack"></div>
+    </div>
+  </section>
+</div>
+
+<!-- ================= MODALS ================= -->
+<section id="screen-settings" class="modal hidden">
+  <div class="settings glass">
+    <aside class="settabs" id="setTabs">
+      <h2>Settings</h2>
+      <button data-v="gameplay" class="on">Gameplay</button>
+      <button data-v="video">Video</button>
+      <button data-v="audio">Audio</button>
+      <button data-v="controls">Controls</button>
+    </aside>
+    <div class="setbody">
+      <div class="setpane" data-pane="gameplay">
+        <div class="setrow"><div><b>Mouse sensitivity</b><small>Camera and aim speed</small></div><div class="ctl"><input id="setSens" type="range" min="0.2" max="3" step="0.05"><span id="setSensVal"></span></div></div>
+        <div class="setrow"><div><b>Invert Y axis</b><small>Flip vertical mouse look</small></div><div class="ctl"><div class="seg" id="setInvert"><button data-v="off">Off</button><button data-v="on">On</button></div></div></div>
+        <div class="setrow"><div><b>Field of view</b><small>Wider shows more of the room</small></div><div class="ctl"><input id="setFov" type="range" min="55" max="100" step="1"><span id="setFovVal"></span></div></div>
+      </div>
+      <div class="setpane hidden" data-pane="video">
+        <div class="setrow"><div><b>Graphics quality</b><small>Low turns off shadows and lowers resolution</small></div><div class="ctl"><div class="seg" id="setQuality"><button data-v="low">Low</button><button data-v="medium">Medium</button><button data-v="high">High</button></div></div></div>
+        <div class="setrow"><div><b>Fullscreen</b><small>Also F11</small></div><div class="ctl"><button class="secbtn" id="fsBtn">Toggle</button></div></div>
+      </div>
+      <div class="setpane hidden" data-pane="audio">
+        <div class="setrow"><div><b>Master volume</b><small>Whistles, bonks and music cues</small></div><div class="ctl"><input id="setVol" type="range" min="0" max="1" step="0.05"><span id="setVolVal"></span></div></div>
+      </div>
+      <div class="setpane hidden" data-pane="controls"><div class="keys" id="keyList"></div></div>
+      <div class="setfoot"><button class="cta" id="setBack">Done</button></div>
+    </div>
+  </div>
+</section>
+
+<section id="screen-host" class="modal hidden">
+  <div class="dialog glass">
+    <h2>Host a server</h2>
+    <p class="muted" id="hostNote">Runs inside this app. People on your Wi-Fi see it automatically; friends elsewhere join over Tailscale or a forwarded port.</p>
+    <div class="form">
+      <label><span>Server name</span><input id="hName" maxlength="40"></label>
+      <div class="two"><label><span>Port</span><input id="hPort" value="7777" type="number"></label><label><span>Max players</span><input id="hMax" value="15" type="number" min="2" max="24"></label></div>
+      <label><span>Password (optional)</span><input id="hPass" type="password"></label>
+    </div>
+    <div class="dfoot"><button class="ghostbtn" id="hostCancel">Cancel</button><button class="cta" id="hostGo">Start server</button></div>
+  </div>
+</section>
+
+<section id="screen-pause" class="modal side hidden">
+  <div class="pausemenu">
+    <span class="eyebrow" id="pauseSub">Paused</span>
+    <h1 id="pauseTitle">Paused</h1>
+    <button class="pm primary" id="resumeBtn">Resume</button>
+    <button class="pm" id="pauseChar">Locker</button>
+    <button class="pm" id="pauseSettings">Settings</button>
+    <button class="pm danger" id="quitBtn">Leave</button>
+  </div>
+</section>
+
+<section id="screen-hand" class="modal hidden">
+  <div class="dialog glass center"><span class="eyebrow">Pass &amp; play</span><h2 id="handTitle">Hider 1</h2><p id="handText" class="muted"></p><button class="cta" id="handGo">I'm ready</button></div>
+</section>
+
+<section id="screen-end" class="modal hidden">
+  <div class="endscreen">
+    <div class="endbanner" id="endBanner"><span class="eyebrow" id="endKicker">Round over</span><h1 id="endTitle">Victory</h1><p id="endText"></p></div>
+    <div class="endgrid">
+      <div class="glass endcol"><h3>Chameleons</h3><ul id="endList" class="rows"></ul></div>
+      <div class="glass endcol"><h3>Experience</h3><ul id="endXp" class="rows xp"></ul>
+        <div class="lvl"><div class="lvrow"><b id="endLevel">Level 1</b><small id="endLvTxt"></small></div><div class="xpbar big"><i id="endLvBar"></i></div></div>
+        <div id="endUnlocks" class="unlocks"></div></div>
+    </div>
+    <div class="endfoot"><button class="ghostbtn" id="menuBtn">Menu</button><button class="secbtn" id="revealBtn">Show hiding spots</button><button class="cta" id="againBtn">Play again</button></div>
+  </div>
+</section>
+
+<section id="screen-load" class="modal load hidden">
+  <i class="loadbg" id="loadBg"></i>
+  <div class="loadinfo"><span class="eyebrow" id="loadKicker">Loading</span><h1 id="loadTitle">Loading…</h1><p id="loadTip"></p><div class="loadbar"><i></i></div></div>
+</section>
+
+<!-- ================= IN-ROUND HUD ================= -->
 <div id="hud" class="hidden">
-  <div id="topbar">
-    <div id="phase">Hide!</div><div id="timer">1:00</div><div id="sub"></div>
+  <div id="topcenter">
+    <div class="teams"><span class="team hiders" id="tHiders">0</span><div class="clock"><span id="phase">Hide</span><b id="timer">1:00</b></div><span class="team hunters" id="tHunters">0</span></div>
     <div class="tbar"><i id="timerBar"></i></div>
+    <div id="sub"></div>
   </div>
-  <div id="status" class="panel"></div>
+  <div id="status"></div>
   <div id="feed"></div>
-  <div id="eyes" class="panel hidden">
-    <div class="eyes-label"><span data-ico="eye">Hunter attention</span><b id="eyesTxt">Unseen</b></div>
-    <div class="bar"><i id="eyesBar"></i></div>
-  </div>
+  <div id="eyes" class="hidden"><div class="eyeic" data-ico="eye"></div><div class="eyebody"><div class="eyes-label"><span>Hunter attention</span><b id="eyesTxt">Unseen</b></div><div class="bar"><i id="eyesBar"></i></div></div></div>
   <div id="crosshair" class="hidden"></div>
   <div id="hint"></div>
-  <div id="blind" class="hidden"><div><b>Eyes closed!</b><span>The chameleons are hiding…</span><em id="blindTime">60</em></div></div>
+  <div id="blind" class="hidden"><div><span class="eyebrow">Hunters wait</span><b>Eyes closed</b><span>The chameleons are hiding</span><em id="blindTime">60</em></div></div>
   <div id="abilities"></div>
 
-  <aside id="paintPanel" class="panel hidden">
-    <header><div><h3>Paint yourself</h3><span class="muted">Match the room. Hunters see colour <i>and</i> shine.</span></div><button id="paintDone" class="primary">Done <kbd>F</kbd></button></header>
+  <aside id="paintPanel" class="glass hidden">
+    <header><div><span class="eyebrow">Camouflage</span><h3>Paint yourself</h3></div><button class="cta small" id="paintDone">Done <kbd>F</kbd></button></header>
     <div class="tools">
       <button data-tool="brush" class="on" title="Brush (B)" data-ico="brush">Brush</button>
-      <button data-tool="mimic" title="Mimic brush (M): paints whatever is behind you from this angle" data-ico="eye">Mimic</button>
-      <button data-tool="picker" title="Eyedropper (I): click the room to sample" data-ico="decoy">Sample</button>
+      <button data-tool="mimic" title="Mimic (M): paints whatever is behind you from this angle" data-ico="eye">Mimic</button>
+      <button data-tool="picker" title="Sample (I): click the room to pick a colour" data-ico="drop">Sample</button>
       <button data-tool="fill" title="Fill whole body (G)" data-ico="splat">Fill</button>
     </div>
     <div class="colorrow"><label class="colorwell"><input type="color" id="color" value="#7a4a2c"><span id="colorHex">#7a4a2c</span></label><div id="swatches"></div></div>
@@ -46,200 +235,71 @@
     <label class="slider">Roughness <span id="roughVal">0.85</span><input type="range" id="rough" min="0" max="100" value="85"></label>
     <label class="slider">Shine <span id="metalVal">0.00</span><input type="range" id="metal" min="0" max="100" value="0"></label>
     <div class="ink" id="inkRow"><span>Mimic ink</span><div class="bar"><i id="inkBar"></i></div></div>
-    <div class="row"><button id="undoBtn">Undo <kbd>Ctrl Z</kbd></button><button id="clearBtn">Wipe white</button></div>
-    <div class="stack"><span>Pose</span><div class="posegrid" id="paintPoses"></div></div>
-    <div class="stack"><span>Body</span><div class="seg wrap" id="shapeSeg"></div></div>
-    <div class="group"><span>Size</span><div class="seg" id="sizeSeg"><button data-v="petite">Petite</button><button data-v="normal" class="on">Normal</button><button data-v="plump">Plump</button></div></div>
-    <div class="group"><span>Turn</span><div class="seg"><button id="rotL">⟲ <kbd>Z</kbd></button><button id="rotR">⟳ <kbd>X</kbd></button></div></div>
-    <p class="tip">Left-drag paints · Right-drag orbits · Scroll zooms · Alt+click samples a colour</p>
+    <div class="row2"><button class="secbtn" id="undoBtn">Undo <kbd>Ctrl Z</kbd></button><button class="secbtn" id="clearBtn">Wipe white</button></div>
+    <div class="stack"><span class="eyebrow">Pose</span><div class="posegrid" id="paintPoses"></div></div>
+    <div class="stack"><span class="eyebrow">Body</span><div class="seg wrap" id="shapeSeg"></div></div>
+    <div class="stack"><span class="eyebrow">Size</span><div class="seg" id="sizeSeg"><button data-v="petite">Petite</button><button data-v="normal" class="on">Normal</button><button data-v="plump">Plump</button></div></div>
+    <div class="stack"><span class="eyebrow">Turn</span><div class="seg"><button id="rotL">Left <kbd>Z</kbd></button><button id="rotR">Right <kbd>X</kbd></button></div></div>
+    <p class="tip">Left-drag paints · Right-drag orbits · Scroll zooms · Alt+click samples</p>
   </aside>
 </div>
 
-<!-- ============ pose wheel ============ -->
+<!-- scoreboard (hold Tab in a round) -->
+<div id="scoreboard" class="hidden"><div class="sb glass"><div class="sbhead"><h2 id="sbTitle">Scoreboard</h2><span class="muted" id="sbSub"></span></div><div id="sbBody"></div></div></div>
+
+<!-- pose wheel -->
 <div id="poseWheel" class="hidden">
-  <div class="wheelcard panel">
-    <div class="head"><h3>Strike a pose</h3><span class="muted">Click one, or press the number key</span></div>
+  <div class="wheelcard glass">
+    <div class="whead"><h3>Poses</h3><span class="muted">Click one or press its number · Esc to close</span></div>
     <div id="wheelPoses" class="wheelgrid"></div>
     <div id="wheelEmotes" class="emotes"><button data-emote="wave">Wave</button><button data-emote="dance">Dance</button><button data-emote="cheer">Cheer</button></div>
   </div>
 </div>
 
-<!-- ============ lobby hub overlay ============ -->
+<!-- ================= LOBBY HUB HUD ================= -->
 <div id="hubHud" class="hidden">
-  <div id="hubTop"><span id="hubTitle" class="hubtitle">Lobby</span><div id="hubStatus"></div></div>
   <div class="hubleft">
-    <div id="hubPlayers" class="panel"></div>
-    <div class="panel votes"><div class="st-h"><span>Map votes</span></div><div id="hubVotes"></div></div>
+    <div class="glass hubbox"><div class="boxhead"><span id="hubTitle">Lobby</span><b id="hubCount">1/15</b></div><div id="hubPlayers"></div></div>
   </div>
-  <div id="hubTester" class="panel">
+  <div id="hubTop"><div id="hubStatus"></div></div>
+  <div class="hubright">
+    <div class="glass hubbox"><div class="boxhead"><span>Map vote</span></div><div id="hubVotes"></div></div>
+  </div>
+  <div id="hubTester" class="glass">
     <div class="tg" id="testerGrade" data-g="S">S</div>
-    <div><b>Camo tester</b><span id="testerTxt">Stand still in front of it.</span><div class="bar"><i id="testerBar"></i></div></div>
+    <div><span class="eyebrow">Camo tester</span><b id="testerTxt">Stand still in front of it.</b><div class="bar"><i id="testerBar"></i></div></div>
   </div>
-  <div class="hubhint"><kbd>WASD</kbd> move <kbd>Space</kbd> jump <kbd>1-0</kbd> poses <kbd>R</kbd> pose wheel <kbd>G</kbd> emote <kbd>F</kbd> paint <kbd>T</kbd> chat <kbd>Tab</kbd> settings <kbd>Esc</kbd> menu</div>
+  <div class="hubhint"><span><kbd>R</kbd> poses</span><span><kbd>G</kbd> emote</span><span><kbd>F</kbd> paint</span><span><kbd>T</kbd> chat</span><span><kbd>Tab</kbd> lobby settings</span><span><kbd>Esc</kbd> menu</span></div>
 
-  <aside id="hubPanel" class="panel hidden">
-    <div class="head"><h3 id="hpTitle">Lobby settings</h3><button id="hpClose" class="ghost small">Close <kbd>Tab</kbd></button></div>
+  <aside id="hubPanel" class="glass hidden">
+    <div class="phead"><h2 id="hpTitle">Lobby settings</h2><button class="iconbtn" id="hpClose" data-ico="x"></button></div>
     <div id="hpOnline">
-      <h4>Fallback map</h4>
-      <div class="maps small" id="lsMaps"></div>
-      <div class="settings-grid">
-        <div class="group"><span>Mode</span><div class="seg" id="lsMode"></div></div>
-        <div class="group"><span>AI skill</span><div class="seg" id="lsDiff"></div></div>
-        <div class="group"><span>Hunters</span><div class="seg" id="lsHunters"></div></div>
-        <div class="group"><span>AI hunters</span><div class="seg" id="lsAiHunters"></div></div>
-        <div class="group"><span>AI hiders</span><div class="seg" id="lsAiHiders"></div></div>
-        <div class="group"><span>Prep</span><div class="seg" id="lsPrep"></div></div>
-        <div class="group"><span>Hunt</span><div class="seg" id="lsHunt"></div></div>
+      <span class="eyebrow">Fallback map (used when nobody votes)</span>
+      <div class="maprow small" id="lsMaps"></div>
+      <div class="setlist">
+        <div class="setrow"><b>Mode</b><div class="seg" id="lsMode"></div></div>
+        <div class="setrow"><b>Hunters</b><div class="seg" id="lsHunters"></div></div>
+        <div class="setrow"><b>AI hunters</b><div class="seg" id="lsAiHunters"></div></div>
+        <div class="setrow"><b>AI hiders</b><div class="seg" id="lsAiHiders"></div></div>
+        <div class="setrow"><b>Prep time</b><div class="seg" id="lsPrep"></div></div>
+        <div class="setrow"><b>Hunt time</b><div class="seg" id="lsHunt"></div></div>
+        <div class="setrow"><b>AI skill</b><div class="seg" id="lsDiff"></div></div>
       </div>
       <p id="hpNote" class="muted small"></p>
       <p id="lobbyShare" class="share"></p>
-      <h4>Players</h4>
+      <span class="eyebrow">Players</span>
       <div id="hpPlayers" class="plist"></div>
     </div>
     <div id="hpOffline">
-      <p class="muted">Step on a map pad to pick the map, then stand on the green pad to start.</p>
-      <div class="group"><span>Mode</span><div class="seg" id="psKind"><button data-v="hide">Hide</button><button data-v="seek">Seek</button><button data-v="infection">Infection</button></div></div>
-      <div class="group"><span>Difficulty</span><div class="seg" id="psDiff"><button data-v="easy">Easy</button><button data-v="normal">Normal</button><button data-v="hard">Hard</button></div></div>
+      <p class="muted">Walk onto a map pad to pick the map, then stand on the green pad to start.</p>
+      <div class="setlist">
+        <div class="setrow"><b>Mode</b><div class="seg" id="psKind"><button data-v="hide">Hide</button><button data-v="seek">Seek</button><button data-v="infection">Infection</button></div></div>
+        <div class="setrow"><b>Difficulty</b><div class="seg" id="psDiff"><button data-v="easy">Easy</button><button data-v="normal">Normal</button><button data-v="hard">Hard</button></div></div>
+      </div>
     </div>
-    <div class="foot"><div class="row"><button id="hpChar" data-ico="shirt">Character</button><button id="hpLeave" data-ico="door">Leave</button></div><button id="hpStart" class="primary" data-ico="play">Start now</button></div>
+    <div class="pfoot"><button class="ghostbtn" id="hpLeave">Leave</button><button class="secbtn" id="hpChar">Locker</button><button class="cta" id="hpStart">Start now</button></div>
   </aside>
 </div>
-
-<!-- ============ MAIN MENU ============ -->
-<section id="screen-menu" class="screen menu-screen">
-  <div class="menu-left">
-    <div class="logo"><span class="c1">Meccha</span><span class="c2">Chameleon</span></div>
-    <p class="tag">Paint your body. Strike a pose. Become the wallpaper.</p>
-    <div class="playercard" id="playerCard">
-      <div class="avatar" id="pcAvatar">P</div>
-      <div class="pcinfo"><b id="pcName">Player</b><span id="pcLevel">Level 1</span><div class="bar xp"><i id="pcXpBar"></i></div><small id="pcXpTxt"></small></div>
-    </div>
-    <nav class="mainnav">
-      <button id="mPlay" class="navbtn primary"><span data-ico="play"></span><div><b>Play</b><small>Solo vs AI, or practise in the club</small></div></button>
-      <button id="mOnline" class="navbtn"><span data-ico="globe"></span><div><b>Online</b><small>Host or join a server with friends</small></div></button>
-      <button id="mParty" class="navbtn"><span data-ico="users"></span><div><b>Party</b><small>Pass &amp; play on one PC</small></div></button>
-      <button id="mChar" class="navbtn"><span data-ico="shirt"></span><div><b>Character</b><small>Body, face, hunter gear, unlocks</small></div></button>
-      <div class="navrow"><button id="mSettings" class="navsmall" data-ico="gear">Settings</button><button id="mQuit" class="navsmall" data-ico="power">Quit</button></div>
-    </nav>
-  </div>
-  <div class="menu-right">
-    <div class="panel tipcard"><span class="muted">Tip</span><p id="tipText"></p></div>
-    <div class="panel statcard">
-      <div><b id="statGames">0</b><span>Rounds</span></div><div><b id="statWins">0</b><span>Wins</span></div>
-      <div><b id="statSurv">0</b><span>Survived</span></div><div><b id="statFound">0</b><span>Found</span></div>
-    </div>
-    <p class="credit">Fan-made tribute to <i>MECCHA CHAMELEON</i> by lemorion_1224 &amp; Haganeiro.</p>
-  </div>
-</section>
-
-<!-- ============ SOLO ============ -->
-<section id="screen-solo" class="screen hidden">
-  <div class="card wide">
-    <div class="head"><h2>Play</h2><button class="back ghost" data-ico="back">Back</button></div>
-    <div class="modes" id="soloKind">
-      <button class="modecard" data-v="hide"><span data-ico="pose"></span><b>Hide</b><small>Paint yourself and survive the AI hunters with AI teammates.</small></button>
-      <button class="modecard" data-v="seek"><span data-ico="hammer"></span><b>Seek</b><small>You hunt. AI chameleons have painted themselves somewhere.</small></button>
-      <button class="modecard" data-v="infection"><span data-ico="users"></span><b>Infection</b><small>Anyone caught becomes a hunter, you included. Last one standing wins.</small></button>
-    </div>
-    <h4>Map</h4>
-    <div class="maps" id="soloMaps"></div>
-    <div class="foot">
-      <div class="group"><span>Difficulty</span><div class="seg" id="soloDiff"><button data-v="easy">Easy</button><button data-v="normal">Normal</button><button data-v="hard">Hard</button></div></div>
-      <div class="row"><button id="soloHub" class="big" data-ico="flag">Practice in the club</button><button id="soloStart" class="primary big" data-ico="play">Start round</button></div>
-    </div>
-  </div>
-</section>
-
-<!-- ============ PARTY ============ -->
-<section id="screen-party" class="screen hidden">
-  <div class="card wide">
-    <div class="head"><h2>Party: pass &amp; play</h2><button class="back ghost" data-ico="back">Back</button></div>
-    <p class="desc">Friends take turns hiding on one PC while everyone else looks away. Then one person hunts in first person.</p>
-    <div class="row gap">
-      <div class="group"><span>Hiders</span><div class="seg" id="partyHumans"><button data-v="1">1</button><button data-v="2">2</button><button data-v="3">3</button><button data-v="4">4</button></div></div>
-      <div class="group"><span>AI hiders</span><div class="seg" id="partyAI"><button data-v="0">0</button><button data-v="1">1</button><button data-v="2">2</button><button data-v="3">3</button></div></div>
-      <div class="group"><span>AI skill</span><div class="seg" id="partyDiff"><button data-v="easy">Easy</button><button data-v="normal">Normal</button><button data-v="hard">Hard</button></div></div>
-    </div>
-    <h4>Map</h4>
-    <div class="maps" id="partyMaps"></div>
-    <div class="foot"><span></span><button id="partyStart" class="primary big" data-ico="play">Start</button></div>
-  </div>
-</section>
-
-<!-- ============ ONLINE ============ -->
-<section id="screen-online" class="screen hidden">
-  <div class="card wide">
-    <div class="head"><h2>Servers</h2><div class="row"><button id="refreshBtn" class="ghost">Refresh</button><button class="back ghost" data-ico="back">Back</button></div></div>
-    <div id="serverList" class="serverlist"><div class="empty">Searching your network…</div></div>
-    <div class="joinrow">
-      <input id="addrInput" placeholder="Join by address, e.g. 192.168.1.20:7777">
-      <input id="addrPass" type="password" placeholder="Password (optional)">
-      <button id="connectBtn" class="primary">Join</button>
-    </div>
-    <div class="hostbox">
-      <div class="row between"><div><b>Host a server</b><p class="desc small">Runs inside this app. People on your Wi-Fi see it automatically; friends elsewhere can join over Tailscale or a forwarded port.</p></div><button id="hostBtn">Host…</button></div>
-      <p id="hostNote" class="desc small"></p>
-      <div id="hostForm" class="hidden hostform">
-        <label>Server name<input id="hName" maxlength="40"></label>
-        <label>Port<input id="hPort" value="7777" type="number"></label>
-        <label>Password<input id="hPass" type="password" placeholder="none"></label>
-        <label>Max players<input id="hMax" value="12" type="number" min="2" max="24"></label>
-        <button id="hostGo" class="primary">Start server</button>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ============ CHARACTER ============ -->
-<section id="screen-char" class="screen hidden">
-  <div class="card wide charcard">
-    <div class="head"><h2>Character</h2><div class="row"><button id="randomChar" class="ghost">Randomise</button><button id="charBack" class="primary">Done</button></div></div>
-    <div class="chargrid">
-      <div class="previewbox"><canvas id="previewCanvas"></canvas><div id="charLevel" class="charlevel"></div></div>
-      <div class="charside">
-        <label class="namefield">Name<input id="nameInput" maxlength="20"></label>
-        <div class="seg tabs" id="charTabs"><button data-v="cham" class="on">Chameleon</button><button data-v="hunter">Hunter</button><button data-v="stats">Stats &amp; unlocks</button></div>
-        <div id="charOpts"></div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ============ SETTINGS ============ -->
-<section id="screen-settings" class="screen hidden">
-  <div class="card small left">
-    <div class="head"><h2>Settings</h2><button id="setBack" class="primary">Done</button></div>
-    <label class="slider">Mouse sensitivity <span id="setSensVal"></span><input id="setSens" type="range" min="0.2" max="3" step="0.05"></label>
-    <label class="slider">Volume <span id="setVolVal"></span><input id="setVol" type="range" min="0" max="1" step="0.05"></label>
-    <label class="slider">Field of view <span id="setFovVal"></span><input id="setFov" type="range" min="55" max="100" step="1"></label>
-    <div class="group"><span>Quality</span><div class="seg" id="setQuality"><button data-v="low">Low</button><button data-v="medium">Medium</button><button data-v="high">High</button></div></div>
-    <div class="group"><span>Invert Y</span><div class="seg" id="setInvert"><button data-v="off">Off</button><button data-v="on">On</button></div></div>
-    <button id="fsBtn">Toggle fullscreen (F11)</button>
-  </div>
-</section>
-
-<section id="screen-hand" class="screen hidden">
-  <div class="card small"><h2 id="handTitle">Hider 1</h2><p id="handText">Take the mouse. Everyone else, look away!</p><button id="handGo" class="primary big">I'm ready</button></div>
-</section>
-<section id="screen-end" class="screen hidden">
-  <div class="card endcard">
-    <div class="endhead"><span id="endBadge" class="badge win">Victory</span><h2 id="endTitle">Round over</h2><p id="endText"></p></div>
-    <div class="endgrid">
-      <div><h4>Chameleons</h4><ul id="endList" class="list"></ul></div>
-      <div><h4>Experience</h4><ul id="endXp" class="list xp"></ul>
-        <div class="lvl"><b id="endLevel">Level 1</b><div class="bar xp"><i id="endLvBar"></i></div><small id="endLvTxt"></small></div>
-        <div id="endUnlocks" class="unlocks"></div></div>
-    </div>
-    <div class="row center"><button id="revealBtn" class="big">Show hiding spots</button><button id="againBtn" class="primary big">Play again</button><button id="menuBtn" class="big ghost">Menu</button></div>
-  </div>
-</section>
-<section id="screen-pause" class="screen hidden">
-  <div class="card small"><h2 id="pauseTitle">Paused</h2><p id="pauseSub">Click Resume to jump back in.</p>
-    <div class="col"><button id="resumeBtn" class="primary big" data-ico="play">Resume</button><button id="pauseChar" class="big" data-ico="shirt">Character</button><button id="pauseSettings" class="big" data-ico="gear">Settings</button><button id="quitBtn" class="big ghost">Quit to menu</button></div></div>
-</section>
-<section id="screen-load" class="screen hidden">
-  <div class="card small load"><div class="spinner"></div><h2 id="loadTitle">Loading…</h2><p id="loadTip" class="muted"></p></div>
-</section>
 
 <script src="three.min.js"></script>
 <script src="core.js"></script>

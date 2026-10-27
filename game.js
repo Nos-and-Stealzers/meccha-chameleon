@@ -409,7 +409,7 @@ const G = {
   ctrl: { yaw: 0, pitch: 0.35, dist: 3.4 }, paintCam: { yaw: 0, pitch: 0.2, dist: 2.6 },
   stats: {}, ab: {}, specIdx: 0, fx: [], labels: [], balls: [], splats: [], rings: [], bubbles: [],
   solo: { kind: 'hide', map: 'mansion', diff: 'normal' }, party: null,
-  lobby: { players: new Map(), settings: { map: 'mansion', mode: 'classic', hunters: 1, aiHunters: 1, aiHiders: 2, prep: 60, hunt: 180, diff: 'normal' }, chat: [], inGame: false },
+  lobby: { players: new Map(), settings: { map: 'mansion', mode: 'classic', hunters: 'auto', aiHunters: 1, aiHiders: 2, prep: 60, hunt: 180, diff: 'normal' }, chat: [], inGame: false },
   hub: null, ink: 100,
   sendT: 0, texT: 0, aiSendT: 0, timerSendT: 0,
 
@@ -799,17 +799,22 @@ const G = {
     if (!this.online || !Net.connected) return;
     this.sendT -= dt; this.texT -= dt; this.aiSendT -= dt; this.timerSendT -= dt;
     const hub = this.phase === 'hub';
+    this.keepT = (this.keepT || 0) - dt;
     if (this.sendT <= 0) {
-      this.sendT = hub ? 1 / 10 : 1 / 12;
+      this.sendT = 1 / 10;
+      const force = this.keepT <= 0; if (force) this.keepT = 1;
       if (this.my && !this.my.caught) {
         const c = this.my, p = c.root.position;
-        const msg = { k: hub ? 'hst' : 'st', a: 'c', id: c.id, p: [+p.x.toFixed(3), +p.y.toFixed(3), +p.z.toFixed(3)], y: +c.yaw.toFixed(3), po: c.pose, sh: c.shape, sz: c.size, r: +c.mat.roughness.toFixed(2), m: +c.mat.metalness.toFixed(2), mv: c.speed > 0.4 ? 1 : 0, em: c.emote || 0, air: c.body.onGround ? 0 : 1 };
+        const msg = { k: hub ? 'hst' : 'st', a: 'c', id: c.id, p: [+p.x.toFixed(2), +p.y.toFixed(2), +p.z.toFixed(2)], y: +c.yaw.toFixed(2), po: c.pose, sh: c.shape, sz: c.size, r: +c.mat.roughness.toFixed(2), m: +c.mat.metalness.toFixed(2), mv: c.speed > 0.4 ? 1 : 0, em: c.emote || 0, air: c.body.onGround ? 0 : 1 };
         if (hub) { msg.ready = this.hub.ready ? 1 : 0; msg.vote = this.hub.vote; msg.name = PROFILE.name; msg.eyes = c.eyes; msg.tag = PROFILE.tag; }
-        Net.relay(msg);
+        const sig = JSON.stringify(msg);
+        if (force || sig !== this.lastSig) { this.lastSig = sig; Net.relay(msg); }
       }
       if (this.myHunter && this.fp && !hub) {
         const p = this.fp.pos;
-        Net.relay({ k: 'st', a: 'h', id: this.myHunter.id, p: [+p.x.toFixed(3), +p.y.toFixed(3), +p.z.toFixed(3)], y: +(this.fp.yaw + Math.PI).toFixed(3) });
+        const msg = { k: 'st', a: 'h', id: this.myHunter.id, p: [+p.x.toFixed(2), +p.y.toFixed(2), +p.z.toFixed(2)], y: +(this.fp.yaw + Math.PI).toFixed(2) };
+        const sig = JSON.stringify(msg);
+        if (force || sig !== this.lastHSig) { this.lastHSig = sig; Net.relay(msg); }
       }
     }
     if (this.my && this.my.texVer !== this.my.sentVer && this.texT <= 0) { this.texT = 0.6; this.my.sentVer = this.my.texVer; Net.relay({ k: hub ? 'htex' : 'tex', id: this.my.id, url: this.my.texURL() }); }
@@ -817,7 +822,8 @@ const G = {
     if (this.isHost && this.aiSendT <= 0) {
       this.aiSendT = 0.1;
       const list = this.hunters.filter((h) => h.ai).map((h) => [h.id, +h.pos.x.toFixed(2), +h.pos.y.toFixed(2), +h.pos.z.toFixed(2), +h.yaw.toFixed(2), h.state]);
-      if (list.length) Net.relay({ k: 'ai', list });
+      const sig = JSON.stringify(list);
+      if (list.length && sig !== this.lastAiSig) { this.lastAiSig = sig; Net.relay({ k: 'ai', list }); }
     }
     if (this.isHost && this.timerSendT <= 0) { this.timerSendT = 1; Net.relay({ k: 'timer', t: this.timer, phase: this.phase }); }
   },
@@ -825,6 +831,7 @@ const G = {
     const fromHost = from === Net.hostId;
     switch (d.k) {
       case 'start': if (fromHost) this.setupRound(d.P); break;
+      case 'late': if (fromHost && (this.phase === 'hub' || this.phase === 'menu')) this.joinLate(d); break;
       case 'ev': if (fromHost || ['whistle', 'clone', 'swing', 'ping', 'pb', 'splat', 'splatw', 'decoy'].includes(d.ev.e)) this.applyEvent(d.ev); break;
       case 'tag': if (this.isHost) this.hostTag(d.target, d.by); break;
       case 'timer': if (fromHost && Math.abs(this.timer - d.t) > 0.6) this.timer = d.t; break;
@@ -843,13 +850,31 @@ const G = {
       case 'cd': if (fromHost && this.hub) { this.hub.cd = d.t; if (d.t != null && d.t <= 3 && d.t > 0) Sound.tick(); } break;
     }
   },
+  /** Host: send the running round to someone who joined mid-round so they can spectate. */
+  sendLate(id) {
+    if (!this.isHost || !this.P || !(playing() || this.phase === 'end')) return;
+    const caught = this.realHiders().filter((c) => c.caught).map((c) => c.id);
+    const extra = this.hunters.filter((h) => !this.P.players.some((p) => p.id === h.id) && !this.P.aiHunters.some((a) => a.id === h.id)).map((h) => ({ id: h.id, name: h.name, avatar: h.avatar, ai: h.ai }));
+    Net.to(id, { k: 'late', P: this.P, phase: this.phase === 'end' ? 'hunt' : this.phase, timer: this.timer, caught, extra });
+  },
+  async joinLate(d) {
+    await this.setupRound(d.P);
+    for (const id of d.caught) { const c = this.findCham(id); if (c) { c.caught = true; c.root.visible = false; } }
+    for (const e of d.extra || []) if (!this.findHunter(e.id)) this.hunters.push(new Hunter({ ...e, x: MAP.playerSpawn[0], z: MAP.playerSpawn[1] }));
+    this.view = 'spec';
+    this.setPhase(d.phase, d.timer);
+    UI.blind(false);
+    toast('Round in progress. You are spectating until the next one.', 'warn');
+    UI.status();
+  },
   async hostStartOnline(mapOverride) {
     const L = this.lobby, s = L.settings, ids = [...L.players.keys()];
     if (!ids.length || this.starting) return;
     this.starting = true;
     try {
       const map = mapOverride || s.map;
-      const nHunters = ids.length === 1 ? 0 : clamp(s.hunters, 1, ids.length - 1);
+      const want = s.hunters === 'auto' || !s.hunters ? Math.round(ids.length / 4) : +s.hunters;
+      const nHunters = ids.length === 1 ? 0 : clamp(want, 1, ids.length - 1);
       const shuffled = ids.slice().sort(() => Math.random() - 0.5);
       const hunterIds = new Set(shuffled.slice(0, nHunters));
       const players = ids.map((id) => { const p = L.players.get(id); return { id, name: p.name, profile: p.profile, role: hunterIds.has(id) ? 'hunter' : 'hider' }; });
@@ -958,6 +983,11 @@ function updateHub(dt) {
   const H = G.hub, M = MAPS.lobby.hub, me = G.my;
   if (!H || !me) return;
   updateMyCham(dt);
+  if (G.online && Net.isPublic && !Net.isHost) {
+    const ho = H.others.get(Net.hostId), last = ho ? ho.seen : (H.since ??= G.t);
+    H.claimT = (H.claimT || 0) - dt;
+    if (G.t - last > 15 && H.claimT <= 0) { H.claimT = 5; Net.send({ t: 'claimhost' }); }
+  }
   const p = me.root.position;
   const onReady = Math.hypot(p.x - M.readyPad.x, p.z - M.readyPad.z) < M.readyPad.r && p.y < 0.3;
   if (onReady !== H.ready) { H.ready = onReady; Sound.ready(onReady); UI.renderHub(); M.readyPad.mesh.material.color.set(onReady ? 0x3ad49c : 0x1f8f66); }
@@ -991,10 +1021,14 @@ function updateHub(dt) {
   }
   refreshVotes();
   // countdown (host or offline)
-  const players = hubPlayers(), allReady = players.length > 0 && players.every((x) => x.ready);
+  const players = hubPlayers().filter((x) => x.inHub !== false), nReady = players.filter((x) => x.ready).length;
+  const allReady = players.length > 0 && nReady === players.length;
+  const majority = G.online && players.length >= 3 && nReady * 2 >= players.length;
   if (!G.online || Net.isHost) {
-    if (allReady && !G.starting) {
-      if (H.cd == null) { H.cd = G.online ? 5 : 3; H.cdT = 0; if (G.online) Net.relay({ k: 'cd', t: H.cd }); Sound.tick(); }
+    const want = allReady ? (G.online ? 5 : 3) : majority ? 20 : null;
+    if (want != null && H.cd != null && H.cd > want) { H.cd = want; if (G.online) Net.relay({ k: 'cd', t: H.cd }); }
+    if (want != null && !G.starting) {
+      if (H.cd == null) { H.cd = want; H.cdT = 0; if (G.online) Net.relay({ k: 'cd', t: H.cd }); Sound.tick(); }
       H.cdT += dt;
       if (H.cdT >= 1) {
         H.cdT -= 1; H.cd--;
@@ -1448,6 +1482,14 @@ function step(dt) {
 }
 let last = performance.now();
 function frame(now) { const dt = Math.min(0.05, (now - last) / 1000); last = now; step(dt); requestAnimationFrame(frame); }
+/* When the window is minimised or covered the browser stops animation frames. Keep the game and its networking
+   ticking at 10 Hz without rendering so a host who alt-tabs doesn't freeze everyone else's round. */
+setInterval(() => {
+  const now = performance.now();
+  if (now - last < 250 || G.phase === 'boot') return;
+  const dt = Math.min(0.1, (now - last) / 1000); last = now;
+  update(dt); for (const c of G.hiders) c.flush();
+}, 100);
 
 /* ================= map thumbnails (rendered once at boot) ================= */
 const THUMB_CAM = {
@@ -1462,10 +1504,10 @@ async function makeThumbs() {
   const W = 400, H = 225, rt = new THREE.WebGLRenderTarget(W, H), buf = new Uint8Array(W * H * 4);
   const cam = new THREE.PerspectiveCamera(62, W / H, 0.05, 160);
   const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d'); const img = g.createImageData(W, H);
-  for (const id of MAP_ORDER) {
+  for (const id of [...MAP_ORDER, 'lobby']) {
     await nextFrame();
     loadMap(id);
-    const t = THUMB_CAM[id] || [MAP.playerSpawn[0], 1.7, MAP.playerSpawn[1], MAP.bounds.x1 / 2, 1, MAP.bounds.z1 / 2];
+    const t = id === 'lobby' ? [MAP.playerSpawn[0], 3.2, MAP.playerSpawn[1] + 6, MAP.playerSpawn[0], 1.2, MAP.playerSpawn[1] - 6] : THUMB_CAM[id] || [MAP.playerSpawn[0], 1.7, MAP.playerSpawn[1], MAP.bounds.x1 / 2, 1, MAP.bounds.z1 / 2];
     cam.position.set(t[0], t[1], t[2]); cam.lookAt(t[3], t[4], t[5]);
     renderer.shadowMap.needsUpdate = true;
     renderer.setRenderTarget(rt); renderer.render(scene, cam); renderer.readRenderTargetPixels(rt, 0, 0, W, H, buf); renderer.setRenderTarget(null);

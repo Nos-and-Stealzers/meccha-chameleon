@@ -3,6 +3,9 @@ const path = require('path');
 const server = require('./server/server.js');
 
 app.commandLine.appendSwitch('ignore-gpu-blocklist');
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('disable-background-timer-throttling');
+app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
 
 let win = null, hosted = null, listener = null;
 
