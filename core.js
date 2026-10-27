@@ -386,6 +386,7 @@ const mapGroup = new THREE.Group(); scene.add(mapGroup);
 const env = [];          // static meshes (raycasts, eyedropper)
 const colliders = [];    // Box3 list
 const tops = [];         // flat surfaces to hide on
+const unders = [];       // gaps under tables a chameleon can crawl into
 let ZONES = [], NODES = [], MAP = null, gateBox = null, gateMesh = null;
 
 function tm(key, rx = 1, ry = 1, rough = 0.85, metal = 0) {
@@ -662,6 +663,7 @@ function setGate(closed) {
 const MAPS = {};
 function disposeObj(o) {
   o.traverse((c) => {
+    if (c.userData.shared) return;
     if (c.geometry) c.geometry.dispose();
     if (c.material) { const ms = Array.isArray(c.material) ? c.material : [c.material]; for (const m of ms) { if (m.map) m.map.dispose(); m.dispose(); } }
   });
@@ -669,7 +671,7 @@ function disposeObj(o) {
 function loadMap(id) {
   const def = MAPS[id] || MAPS.mansion;
   for (const c of [...mapGroup.children]) { mapGroup.remove(c); disposeObj(c); }
-  env.length = 0; colliders.length = 0; tops.length = 0; _envBoxes.clear(); navCols = []; lampCount = 0;
+  env.length = 0; colliders.length = 0; tops.length = 0; unders.length = 0; _envBoxes.clear(); navCols = []; lampCount = 0;
   gateBox = null; gateMesh = null;
   MAP = Object.assign({ wallH: 3.2, ceilH: 3.2, floorY: 0 }, def);
   ZONES = def.zones.map((z) => ({ ...z }));
@@ -691,6 +693,11 @@ function loadMap(id) {
     gateMesh = new THREE.Mesh(new THREE.BoxGeometry(g.a === 'h' ? w : 0.16, h, g.a === 'h' ? 0.16 : w), tm('hazard', 3, 4, 0.7));
     gateMesh.position.set(g.x, h / 2, g.z); gateMesh.castShadow = true; mapGroup.add(gateMesh);
     gateBox = g.a === 'h' ? new THREE.Box3(new V3(g.x - w / 2, 0, g.z - 0.08), new V3(g.x + w / 2, h, g.z + 0.08)) : new THREE.Box3(new V3(g.x - 0.08, 0, g.z - w / 2), new V3(g.x + 0.08, h, g.z + w / 2));
+  }
+  for (const z of ZONES) { const ok = z.pts.filter(([x, zz]) => freeAt(x, zz, 0.3, 1.6)); if (ok.length) z.pts = ok; }
+  if (def.gate) {
+    const g = def.gate;
+    for (const d of [-1.3, 1.3]) { const x = g.a === 'h' ? g.x : g.x + d, z = g.a === 'h' ? g.z + d : g.z; if (freeAt(x, z, 0.3, 1.6)) extra.push([x, z]); }
   }
   buildNav(extra);
   setGate(true);

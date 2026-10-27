@@ -490,3 +490,17 @@ label.slider input{margin-top:6px}
 ::-webkit-scrollbar-thumb{background:rgba(255,255,255,.14);border-radius:4px}
 ::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.26)}
 ::-webkit-scrollbar-corner{background:transparent}
+
+/* round banners */
+#banner{position:absolute;top:30%;left:50%;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;pointer-events:none;text-shadow:0 4px 24px rgba(0,0,0,.55)}
+#banner .bk{font:700 13px var(--display);letter-spacing:.3em;text-transform:uppercase;color:#e6eaf2;background:rgba(6,8,13,.6);padding:5px 14px;border-radius:4px}
+#banner .bt{font:900 84px/1 var(--display);letter-spacing:.04em;text-transform:uppercase;color:#fff}
+#banner .bs{font:600 16px var(--body);color:#e6eaf2;max-width:560px}
+#banner.hider .bt{color:var(--accent)} #banner.hunter .bt{color:#ff6b7f} #banner.warn .bt{color:var(--yellow)} #banner.count .bt{font-size:150px;color:var(--yellow)}
+#banner.show{animation:bannerIn .35s cubic-bezier(.2,1.4,.4,1) both}
+#banner.out{animation:bannerOut .3s ease-in both}
+@keyframes bannerIn{from{opacity:0;transform:translate(-50%,-50%) scale(1.4)}to{opacity:1;transform:translate(-50%,-50%) scale(1)}}
+@keyframes bannerOut{to{opacity:0;transform:translate(-50%,-50%) scale(.92)}}
+#timer.overtime{color:var(--yellow);animation:pulseT .6s infinite alternate}
+@keyframes pulseT{to{transform:scale(1.08)}}
+.autoback{font-size:12px;color:var(--muted);text-align:center}

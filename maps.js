@@ -34,18 +34,18 @@ MAPS.mansion = {
   id: 'mansion', name: 'Hide-and-Seek Mansion', desc: 'Wallpaper, rugs, bookshelves and a ball pit. The classic.', colors: ['#4f9a94', '#e8c27a'],
   bounds: { x0: 0, z0: 0, x1: 32, z1: 24 }, wallH: 3.2, ceilH: 3.2,
   zones: [
-    { id: 'living', name: 'Living Room', x0: 0, z0: 0, x1: 12, z1: 10, pts: [[6, 6.6], [2.8, 3.6], [9.6, 3.8], [3.6, 8.7], [9.4, 7.8]] },
-    { id: 'kitchen', name: 'Kitchen', x0: 12, z0: 0, x1: 20, z1: 10, pts: [[16, 3.2], [13.8, 8.8], [18.6, 8.6], [18.6, 4.2], [13.7, 6.4], [13.6, 3.0]] },
-    { id: 'library', name: 'Library', x0: 20, z0: 0, x1: 32, z1: 10, pts: [[26, 3], [22.6, 5], [29.5, 5], [23.5, 8.4], [28.4, 8.6]] },
+    { id: 'living', name: 'Living Room', x0: 0, z0: 0, x1: 12, z1: 10 },
+    { id: 'kitchen', name: 'Kitchen', x0: 12, z0: 0, x1: 20, z1: 10 },
+    { id: 'library', name: 'Library', x0: 20, z0: 0, x1: 32, z1: 10 },
     { id: 'hall', name: 'Hallway', x0: 0, z0: 10, x1: 32, z1: 14, pts: [[1.8, 12], [5, 12], [10, 12], [13, 12], [16, 12], [21, 12], [26, 12], [29, 12], [30.6, 12]] },
-    { id: 'bedroom', name: 'Bedroom', x0: 0, z0: 14, x1: 10, z1: 24, pts: [[5, 18.2], [2.4, 16.6], [7.6, 20.2], [6.2, 22.6]] },
-    { id: 'bath', name: 'Bathroom', x0: 10, z0: 14, x1: 16, z1: 24, pts: [[13, 17.2], [12.8, 20.8]] },
-    { id: 'play', name: 'Playroom', x0: 16, z0: 14, x1: 26, z1: 24, pts: [[21.2, 18.4], [18.8, 16.4], [24, 16.4], [20.6, 22.4]] },
+    { id: 'bedroom', name: 'Bedroom', x0: 0, z0: 14, x1: 10, z1: 24 },
+    { id: 'bath', name: 'Bathroom', x0: 10, z0: 14, x1: 16, z1: 24 },
+    { id: 'play', name: 'Playroom', x0: 16, z0: 14, x1: 26, z1: 24 },
     { id: 'garage', name: 'Garage', x0: 26, z0: 14, x1: 32, z1: 24, pts: [[29, 16.4], [28.2, 19.5], [29, 22]], hunters: true },
-  ],
+  ].map((z) => ({ ...z, pts: z.pts || gridPts(z.x0, z.z0, z.x1, z.z1, 1.8) })),
   playerSpawn: [16, 12], hunterSpawns: [[28, 17.2], [30, 17.2], [29, 20.5], [28, 22]], gate: { x: 29, z: 14, a: 'h' },
   light: { hemi: 0.6, amb: 0.16, sun: 0.5, sunPos: [-7, 30, -7] },
-  specials: [{ x: 24.4, y: 0, z: 22.6, pose: 'curl', zone: 'play' }, { x: 17.5, y: 0, z: 22.4, pose: 'curl', zone: 'play' }, { x: 16, y: 0, z: 6, pose: 'curl', zone: 'kitchen' }],
+  specials: [{ x: 24.4, y: 0, z: 22.6, pose: 'curl', zone: 'play' }, { x: 17.5, y: 0, z: 22.4, pose: 'curl', zone: 'play' }, { x: 16, y: 0, z: 6.1, pose: 'curl', zone: 'kitchen' }, { x: 26, y: 0, z: 5.5, pose: 'curl', zone: 'library' }],
   build() {
     const f = F();
     const rooms = [
@@ -66,83 +66,99 @@ MAPS.mansion = {
     ];
     const extra = buildShell(rooms, doors);
     plane(16, 3.2, 12, 32, 24, cm('#f6f1e7', 1), Math.PI / 2, 0).castShadow = false;
-    // living
-    plane(6, 0.008, 4.8, 5.2, 3.6, tm('rugLiving', 1, 1, 1), -Math.PI / 2, 0);
-    box(6, 1.05, 4.0, 1.0, 0.45, f.red, { top: true }); box(6, 0.4, 4.0, 0.3, 1.0, f.red);
-    box(3.85, 0.95, 0.32, 1.2, 0.7, f.red); box(8.15, 0.95, 0.32, 1.2, 0.7, f.red);
-    box(5, 1.1, 1.8, 0.7, 0.14, cm('#c94450', 0.95), { y: 0.45, collide: false }); box(7, 1.1, 1.8, 0.7, 0.14, cm('#c94450', 0.95), { y: 0.45, collide: false });
-    table(6, 3.4, 1.6, 0.8, 0.48, f.wood);
-    box(5, 9.55, 2.6, 0.6, 0.55, f.woodDark, { top: true }); box(5, 9.62, 1.7, 0.08, 0.95, f.black, { y: 0.6 });
+    const T = (o) => (o ? o.userData.wb.max.y : 0);
+    // living: sofa set on the rug, TV wall, fireplace, reading nook
+    plane(6, 0.008, 4.6, 5.6, 4.0, tm('rugLiving', 1, 1, 1), -Math.PI / 2, 0);
+    prop('f:loungeSofa', 6, 0.25, { ry: 's', az: 'min' });
+    prop('f:pillowBlue', 5.3, 0.7, { y: 0.55, col: 'none', ry: 's' }); prop('f:pillow', 6.8, 0.7, { y: 0.55, col: 'none', ry: 's' });
+    prop('f:loungeChair', 3.0, 4.0, { ry: 'e' }); prop('f:loungeChair', 9.0, 4.0, { ry: 'w' });
+    const ct = prop('f:tableCoffeeGlass', 6, 3.3);
+    prop('food:bowl-cereal', 5.6, 3.3, { y: T(ct), col: 'none' }); prop('f:books', 6.4, 3.2, { y: T(ct), col: 'none' }); prop('food:cup-coffee', 6.6, 3.5, { y: T(ct), col: 'none' });
+    const tvc = prop('f:cabinetTelevisionDoors', 6, 9.95, { ry: 'n', az: 'max' });
+    prop('f:televisionModern', 6, T(tvc) && 9.6, { ry: 'n', y: T(tvc), col: 'none' });
+    prop('f:speaker', 3.7, 9.95, { ry: 'n', az: 'max' }); prop('f:speaker', 8.3, 9.95, { ry: 'n', az: 'max' });
     box(0.5, 5, 0.8, 2.4, 1.3, tm('brick', 1, 1)); box(0.91, 5, 0.02, 1.2, 0.8, cm('#151515', 1), { collide: false });
     box(0.55, 5, 1.0, 2.7, 0.12, f.woodDark, { y: 1.3, top: true });
+    prop('f:lampRoundTable', 0.55, 4.0, { y: 1.42, col: 'none' }); prop('f:plantSmall2', 0.55, 6.0, { y: 1.42, col: 'none' });
     painting(0.1, 5, 'e', 1.4, 0.9, 0, 2.1);
-    box(11.6, 2.2, 0.6, 2.2, 2.2, tm('books', 1, 1, 0.9));
-    box(2.2, 7.55, 1.0, 1.0, 0.45, f.green, { top: true }); box(2.2, 8.1, 1.0, 0.25, 0.95, f.green); box(1.75, 7.55, 0.15, 1.0, 0.65, f.green); box(2.65, 7.55, 0.15, 1.0, 0.65, f.green);
-    plant(0.75, 0.75); plant(11.35, 7.6);
-    cyl(10.7, 0.75, 0.03, 0.03, 1.6, f.gold); cyl(10.7, 0.75, 0.18, 0.3, 0.35, cm('#fff1d0', 1), { y: 1.5 });
-    painting(6, 0.1, 's', 2.0, 1.0, 1, 1.95); painting(11.9, 7, 'w', 1.0, 0.8, 2);
+    fillShelves(prop('f:bookcaseOpen', 11.95, 1.6, { ry: 'w', ax: 'max' })); fillShelves(prop('f:bookcaseOpen', 11.95, 2.7, { ry: 'w', ax: 'max' }));
+    prop('f:loungeChairRelax', 10.8, 6.4, { ry: 'w' }); prop('f:lampRoundFloor', 11.5, 7.5);
+    prop('f:loungeSofaOttoman', 2.4, 8.0);
+    prop('f:pottedPlant', 0.7, 0.7); prop('f:pottedPlant', 11.3, 9.3); prop('f:pottedPlant', 0.7, 9.3);
+    const sd = prop('f:sideTable', 9.4, 0.05, { ry: 's', az: 'min' }); prop('f:radio', 9.4, 0.3, { ry: 's', y: T(sd), col: 'none' });
+    painting(6, 0.1, 's', 2.0, 1.0, 1, 2.25); painting(11.9, 4.6, 'w', 1.0, 0.8, 2);
     lamp(6, 5, 0xffe2b8, 0.6);
-    // kitchen
-    box(15.5, 0.45, 6.4, 0.7, 0.88, tm('cabinets', 3, 1, 0.6));
-    box(15.5, 0.47, 6.5, 0.76, 0.06, cm('#e9e6e0', 0.35), { y: 0.88, top: true });
-    box(14, 0.47, 0.8, 0.6, 0.015, f.black, { y: 0.94, collide: false });
-    box(17, 0.47, 0.8, 0.5, 0.015, f.steel, { y: 0.94, collide: false });
-    box(19.4, 0.5, 0.9, 0.8, 2.0, cm('#dfe3e8', 0.3, 0.25));
-    box(15.5, 0.3, 6.4, 0.4, 0.8, tm('cabinets', 3, 1, 0.6), { y: 1.6 });
-    table(16, 6, 2.0, 1.2, 0.84, f.woodLight);
-    chair(15.4, 4.85, 1, f.woodLight); chair(16.6, 4.85, 1, f.woodLight); chair(15.4, 7.15, -1, f.woodLight); chair(16.6, 7.15, -1, f.woodLight);
-    for (let i = 0; i < 5; i++) sph(15.8 + i * 0.1, 0.92, 6 + (i % 2) * 0.1, 0.07, cm(['#e85d3f', '#f2c94c', '#7fb069'][i % 3]), {});
-    box(12.4, 8.2, 0.5, 2.4, 2.0, tm('jars', 1, 1));
-    plane(17, 0.008, 1.3, 1.4, 0.6, tm('rugPink', 2, 1, 1), -Math.PI / 2, 0);
+    // kitchen: counter run, fridge, dining table
+    const counter = ['f:kitchenCabinet', 'f:kitchenSink', 'f:kitchenCabinetDrawer', 'f:kitchenStove', 'f:kitchenCabinetDrawer'];
+    let cx = 12.05; const cTop = [];
+    for (const k of counter) { const o = prop(k, cx, 0.02, { ry: 's', ax: 'min', az: 'min', top: true }); cTop.push(o); cx = o.userData.wb.max.x; }
+    const ch = T(cTop[0]);
+    prop('f:kitchenCabinetUpperDouble', 12.05, 0.02, { ry: 's', y: 1.95, col: 'none', ax: 'min', az: 'min' }); prop('f:hoodModern', (cTop[3].userData.wb.min.x + cTop[3].userData.wb.max.x) / 2, 0.02, { ry: 's', y: 1.95, col: 'none', az: 'min' });
+    prop('f:kitchenCoffeeMachine', 12.6, 0.35, { ry: 's', y: ch, col: 'none' }); prop('f:toaster', 14.9, 0.4, { ry: 's', y: ch, col: 'none' });
+    prop('f:kitchenMicrowave', cx - 0.5, 0.4, { ry: 's', y: ch, col: 'none' }); prop('f:kitchenBlender', 17.2, 0.4, { ry: 's', y: ch, col: 'none' });
+    prop('f:kitchenFridgeLarge', 19.95, 0.02, { ry: 's', s: 0.78, ax: 'max', az: 'min' });
+    const dt = prop('f:tableCloth', 16, 6.0, { ry: 'e' });
+    for (const [x, z, r] of [[15.25, 5.15, 'e'], [15.25, 6.85, 'e'], [16.75, 5.15, 'w'], [16.75, 6.85, 'w']]) prop('f:chairCushion', x, z, { ry: r });
+    prop('food:pizza', 16, 5.6, { y: T(dt), col: 'none' }); prop('food:apple', 15.9, 6.4, { y: T(dt), col: 'none' }); prop('food:glass', 16.2, 6.5, { y: T(dt), col: 'none' }); prop('food:bowl-soup', 15.8, 6.8, { y: T(dt), col: 'none' });
+    prop('f:kitchenBar', 12.05, 8.6, { ry: 'e', ax: 'min' }); prop('f:stoolBar', 13.5, 8.2, { ry: 'w' }); prop('f:stoolBar', 13.5, 9.1, { ry: 'w' });
+    prop('f:trashcan', 19.6, 9.5, { s: 0.42 });
+    plane(17, 0.008, 2.2, 1.4, 0.6, tm('rugPink', 2, 1, 1), -Math.PI / 2, 0);
     painting(19.9, 6.5, 'w', 0.8, 0.6, 3);
     lamp(16, 4); lamp(16, 7.5, 0xfff0d0, 0.3);
-    // library
-    for (const x of [22.5, 25.5, 28.5]) box(x, 0.4, 2.6, 0.6, 2.6, tm('books', 1, 1, 0.9));
-    box(31.6, 3, 0.6, 2.6, 2.6, tm('books', 1, 1, 0.9)); box(31.6, 7, 0.6, 2.6, 2.6, tm('books', 1, 1, 0.9));
+    // library: tall shelves, reading table, desk
+    for (const x of [21.2, 22.25, 23.3, 28.7, 29.75, 30.8]) fillShelves(prop('f:bookcaseOpen', x, 0.02, { ry: 's', az: 'min', tint: '#6b4428' }));
+    box(31.6, 3.4, 0.6, 2.6, 2.6, tm('books', 1, 1, 0.9)); box(31.6, 7.2, 0.6, 2.6, 2.6, tm('books', 1, 1, 0.9));
     { const rug = reg(new THREE.Mesh(new THREE.CircleGeometry(2.3, 48), tm('rugRound', 1, 1, 1)), { cast: false }); rug.rotation.x = -Math.PI / 2; rug.position.set(26, 0.008, 5.5); }
-    table(26, 5.5, 1.8, 1.0, 0.8, f.woodDark);
-    cyl(25.5, 5.4, 0.08, 0.16, 0.14, cm('#2f7a4b', 0.5), { y: 1.18 });
-    box(21, 8.6, 1.0, 1.0, 0.45, f.leather, { top: true }); box(21, 9.15, 1.0, 0.25, 0.95, f.leather);
-    box(30.2, 8.8, 1.0, 1.0, 0.45, f.leather, { top: true }); box(30.2, 9.35, 1.0, 0.25, 0.95, f.leather);
+    const lt = prop('f:tableRound', 26, 5.5);
+    prop('f:books', 25.7, 5.4, { y: T(lt), col: 'none' }); prop('f:lampSquareTable', 26.3, 5.7, { y: T(lt), col: 'none' });
+    for (const [x, z, r] of [[24.7, 5.5, 'e'], [27.3, 5.5, 'w']]) prop('f:chairRounded', x, z, { ry: r });
+    prop('f:loungeChairRelax', 21.2, 8.6, { ry: 'e' }); prop('f:loungeChairRelax', 30.6, 8.7, { ry: 'w' });
+    const dk = prop('f:desk', 26, 0.02, { ry: 's', az: 'min' }); prop('f:chairDesk', 26, 2.2, { ry: 'n' });
+    prop('f:laptop', 26, 0.7, { ry: 's', y: T(dk), s: 0.5, col: 'none' }); prop('f:lampSquareTable', 26.7, 0.5, { y: T(dk), col: 'none' });
     cyl(24.6, 9.3, 0.04, 0.2, 0.8, f.woodDark, { collide: true }); sph(24.6, 1.15, 9.3, 0.35, tm('globe', 1, 1, 0.5), {});
-    painting(20.1, 2.2, 'e', 1.0, 1.2, 4); painting(20.1, 8, 'e', 1.0, 1.2, 5);
+    prop('f:pottedPlant', 20.6, 9.4); prop('f:coatRackStanding', 31.4, 9.4);
+    painting(20.1, 2.2, 'e', 1.0, 1.2, 4); painting(20.1, 7.4, 'e', 1.0, 1.2, 5);
     lamp(26, 5, 0xffe0b0, 0.65);
     // hall
     plane(16, 0.008, 12, 29, 1.4, tm('runner', 3, 1, 1), -Math.PI / 2, 0);
     painting(2.5, 10.1, 's', 1.2, 0.9, 6); painting(6.5, 10.1, 's', 1.0, 0.8, 7); painting(13, 10.1, 's', 1.4, 1.0, 8);
     painting(21, 10.1, 's', 1.6, 1.0, 1); painting(30.5, 10.1, 's', 1.0, 1.2, 3);
     painting(9, 13.9, 'n', 1.2, 0.9, 2); painting(17, 13.9, 'n', 1.4, 0.9, 5); painting(25, 13.9, 'n', 1.2, 0.9, 0);
-    box(13, 10.35, 1.2, 0.35, 0.85, f.woodDark, { top: true }); cyl(13.3, 10.35, 0.08, 0.12, 0.35, cm('#3fb7a6', 0.4), { y: 0.85 });
-    box(17, 13.65, 1.6, 0.45, 0.45, f.wood, { top: true });
+    const st = prop('f:sideTableDrawers', 13, 10.1, { ry: 's', az: 'min' }); prop('f:plantSmall1', 13.4, 10.4, { y: T(st), col: 'none' }); prop('f:lampSquareTable', 12.6, 10.4, { y: T(st), col: 'none' });
+    prop('f:benchCushion', 17, 13.95, { ry: 'n', az: 'max' }); prop('f:benchCushion', 8.5, 13.95, { ry: 'n', az: 'max' });
     box(31.65, 12, 0.5, 0.6, 2.2, tm('clock', 1, 1, 0.7));
-    plant(0.6, 10.6, 0.9); plant(0.6, 13.4, 0.9);
+    prop('f:pottedPlant', 0.6, 10.6); prop('f:pottedPlant', 0.6, 13.4); prop('f:coatRackStanding', 23.5, 10.5);
+    prop('f:rugDoormat', 5, 13.4, { ry: 's' });
     for (const x of [5, 16, 27]) lamp(x, 12, 0xffe6c4, 0.4);
     // bedroom
-    box(3, 22.8, 2.2, 2.2, 0.45, f.wood); box(3, 22.7, 2.1, 2.0, 0.25, tm('quilt', 1, 1, 1), { y: 0.45, top: true });
-    box(3, 23.85, 2.3, 0.12, 1.2, f.wood);
-    box(2.5, 23.45, 0.8, 0.4, 0.14, f.white, { y: 0.7, collide: false }); box(3.5, 23.45, 0.8, 0.4, 0.14, f.white, { y: 0.7, collide: false });
-    sph(3.3, 0.86, 22.4, 0.16, cm('#9c6b3e', 1), {}); sph(3.3, 1.08, 22.4, 0.11, cm('#9c6b3e', 1), {});
-    box(4.65, 23.6, 0.5, 0.45, 0.55, f.white, { top: true }); cyl(4.65, 23.6, 0.12, 0.17, 0.25, cm('#ffd1dc', 1), { y: 0.75 });
-    box(9.6, 22.3, 0.65, 1.8, 2.3, tm('wardrobe', 1, 1, 0.75));
-    box(7.6, 14.45, 1.6, 0.5, 0.9, f.white, { top: true }); box(9.3, 15.2, 0.8, 0.5, 0.45, f.pink, { top: true });
-    sph(1.2, 0.3, 18, 0.6, cm('#ff9f43', 1), { collide: true, scale: [1, 0.55, 1] });
+    prop('f:bedDouble', 3.2, 23.95, { ry: 'n', s: 0.85, az: 'max' });
+    prop('f:bear', 3.6, 22.6, { y: 0.8, s: 0.9, col: 'none', ry: 's' });
+    prop('f:pillowLong', 3.2, 23.4, { y: 0.8, col: 'none', ry: 's' });
+    const n1 = prop('f:cabinetBedDrawerTable', 1.15, 23.95, { ry: 'n', az: 'max' }), n2 = prop('f:cabinetBedDrawerTable', 5.25, 23.95, { ry: 'n', az: 'max' });
+    prop('f:lampSquareTable', 1.15, 23.6, { y: T(n1), col: 'none' }); prop('f:plantSmall3', 5.25, 23.6, { y: T(n2), col: 'none' });
+    prop('f:bookcaseClosedDoors', 9.95, 22.6, { ry: 'w', ax: 'max' }); fillShelves(prop('f:bookcaseOpenLow', 9.95, 20.9, { ry: 'w', ax: 'max' }));
+    const desk = prop('f:desk', 7.6, 14.05, { ry: 's', az: 'min' }); prop('f:chairDesk', 7.6, 15.9, { ry: 'n' });
+    prop('f:computerScreen', 7.6, 14.5, { ry: 's', y: T(desk), col: 'none' }); prop('f:computerKeyboard', 7.6, 14.95, { ry: 's', y: T(desk), col: 'none' }); prop('f:computerMouse', 8.1, 14.95, { ry: 's', y: T(desk), col: 'none' });
+    prop('f:sideTableDrawers', 0.05, 16.5, { ry: 'e', ax: 'min' });
+    prop('f:loungeSofaOttoman', 2.2, 19.0, { tint: '#ff9f43' });
+    prop('f:cardboardBoxOpen', 4.6, 15.2, { ry: 0.3 }); prop('f:pillow', 5.4, 17.6, { ry: 1.2 });
     { const rug = reg(new THREE.Mesh(new THREE.CircleGeometry(1.3, 40), tm('rugPink', 3, 3, 1)), { cast: false }); rug.rotation.x = -Math.PI / 2; rug.position.set(5, 0.008, 18.6); }
+    prop('f:pottedPlant', 9.4, 14.6);
     painting(5, 23.9, 'n', 1.2, 0.8, 4); painting(0.1, 20, 'e', 1.0, 1.0, 6);
     lamp(5, 19);
     // bathroom
-    box(13, 23.25, 2.6, 0.12, 0.6, f.white); box(13, 22.65, 2.6, 0.12, 0.6, f.white); box(11.76, 22.95, 0.12, 0.72, 0.6, f.white); box(14.24, 22.95, 0.12, 0.72, 0.6, f.white);
-    box(13, 22.95, 2.4, 0.5, 0.3, cm('#a8d8f0', 0.15), { collide: false });
-    addTop(13, 22.95, 2.4, 0.5, 0.3);
-    box(15.6, 20.5, 0.45, 0.55, 0.42, f.white); box(15.82, 20.5, 0.18, 0.52, 0.45, f.white, { y: 0.42 });
-    box(10.4, 16.5, 0.6, 1.0, 0.85, cm('#5a8fb0', 0.6), { top: true });
-    plane(10.11, 1.6, 16.5, 0.9, 0.7, cm('#cfe3ee', 0.05, 0.9), 0, Math.PI / 2);
+    prop('f:bathtub', 12.8, 23.95, { ry: 'n', s: 0.8, az: 'max' });
+    prop('f:toiletSquare', 15.95, 20.6, { ry: 'w', s: 0.65, ax: 'max' });
+    prop('f:bathroomSinkSquare', 10.05, 16.6, { ry: 'e', s: 0.85, ax: 'min' }); prop('f:bathroomMirror', 10.05, 16.6, { ry: 'e', y: 1.4, col: 'none', ax: 'min' });
+    prop('f:washerDryerStacked', 15.95, 15.0, { ry: 'w', s: 0.8, ax: 'max' });
+    prop('f:bathroomCabinetDrawer', 15.95, 23.0, { ry: 'w', s: 0.85, ax: 'max' });
     plane(14.6, 1.1, 23.89, 0.5, 0.9, tm('towel', 1, 1, 1), 0, Math.PI);
-    plane(12.8, 0.008, 21.6, 1.2, 0.6, tm('rugPink', 2, 1, 1), -Math.PI / 2, 0);
-    cyl(15.4, 15.0, 0.24, 0.2, 0.55, cm('#d8c49a', 1), { collide: true });
+    plane(12.8, 0.008, 21.2, 1.2, 0.6, tm('rugPink', 2, 1, 1), -Math.PI / 2, 0);
     lamp(13, 19, 0xf0f6ff, 0.45);
     // playroom
     box(16.38, 17, 0.55, 2.4, 1.4, tm('toyShelf', 1, 1), { top: true });
-    table(19, 19.6, 1.2, 0.8, 0.53, f.yellow, f.blue);
+    prop('f:tableCoffeeSquare', 19.2, 19.8, { tint: '#ffd43b' });
+    prop('f:chairRounded', 18.2, 19.8, { ry: 'e', s: 0.75, tint: '#4d8dff' }); prop('f:chairRounded', 20.2, 19.8, { ry: 'w', s: 0.75, tint: '#ff5d5d' });
     const pitX0 = 22.5, pitX1 = 25.85, pitZ0 = 20.8, pitZ1 = 23.85;
     box((pitX0 + pitX1) / 2, pitZ0, pitX1 - pitX0, 0.12, 0.5, f.blue); box(pitX0, (pitZ0 + pitZ1) / 2, 0.12, pitZ1 - pitZ0, 0.5, f.blue);
     {
@@ -152,17 +168,18 @@ MAPS.mansion = {
       reg(inst);
     }
     { const t = reg(new THREE.Mesh(new THREE.ConeGeometry(1.05, 2.3, 7, 1, true), tm('teepee', 1, 1, 1))); t.material.side = THREE.DoubleSide; t.position.set(17.5, 1.15, 22.4); }
-    const blockCols = ['#ff5d5d', '#4d8dff', '#3ccf6e', '#ffd43b', '#a66bff'];
-    for (let i = 0; i < 6; i++) box(23 + (i % 4) * 0.5, 18.4 + Math.floor(i / 4) * 0.5, 0.42, 0.42, 0.42, cm(blockCols[i % 5], 0.7));
-    box(23.02, 18.9, 0.42, 0.42, 0.42, cm(blockCols[4], 0.7), { y: 0.42 });
-    sph(24.6, 0.3, 15.2, 0.32, cm('#ff5d5d', 0.5), { collide: true });
+    prop('toy:track-narrow-looping', 24.2, 16.4, { h: 1.6, ry: 'e', col: 'solid' });
+    prop('toy:vehicle-racer', 22.4, 17.4, { s: 0.45, ry: 0.6 }); prop('toy:vehicle-monster-truck', 20.6, 22.4, { s: 0.5, ry: 2.2 }); prop('toy:vehicle-suv', 18.9, 15.5, { s: 0.45, ry: -0.4 });
+    prop('hol:train-locomotive', 21.4, 23.4, { s: 1.4, ry: 'e' }); prop('hol:train-wagon', 20.4, 23.4, { s: 1.4, ry: 'e' }); prop('hol:train-tender', 19.6, 23.4, { s: 1.4, ry: 'e' });
+    prop('f:bear', 17.0, 15.0, { s: 1.5, ry: 0.4 }); prop('hol:present-a-cube', 25.4, 19.4, { s: 1.3 }); prop('hol:present-b-round', 25.4, 18.4, { s: 1.1 });
+    prop('plat:character-oobi', 22.6, 19.3, { h: 0.75, ry: 2.6 }); prop('plat:star', 18.5, 17.6, { h: 0.5, ry: 0.4 });
     painting(21, 23.9, 'n', 2.0, 1.1, 7); painting(25.9, 18, 'w', 1.2, 0.9, 8);
     lamp(21, 19, 0xfff4e0, 0.55);
     // garage
-    box(31.5, 19, 0.7, 2.2, 0.9, tm('crate', 2, 1), { top: true });
     plane(31.89, 1.7, 19, 2.2, 1.1, tm('pegboard', 1, 1), 0, -Math.PI / 2);
-    box(27, 23.2, 0.8, 0.8, 0.8, tm('crate', 1, 1)); box(27.9, 23.2, 0.8, 0.8, 0.8, tm('crate', 1, 1)); box(27.4, 23.2, 0.8, 0.8, 0.8, tm('crate', 1, 1), { y: 0.8 });
-    cyl(30.8, 23.2, 0.3, 0.3, 0.9, cm('#2e6db4', 0.5, 0.3), { collide: true });
+    prop('surv:workbench', 31.95, 19, { ry: 'w', s: 3.4, ax: 'max' });
+    prop('surv:box-large', 26.9, 23.3, { s: 3 }); prop('surv:box-large', 27.9, 23.3, { s: 3 }); prop('surv:box', 27.4, 23.3, { s: 3, y: 0.75 });
+    prop('surv:barrel', 30.9, 23.2, { s: 2.6 }); prop('f:washer', 31.95, 15.0, { ry: 'w', ax: 'max' }); prop('f:dryer', 31.95, 16.1, { ry: 'w', ax: 'max' });
     lamp(29, 19, 0xe8f0ff, 0.5);
     return extra;
   },
@@ -202,13 +219,13 @@ MAPS.backrooms = {
     // props
     const stain = cm('#7d6c3a', 1);
     for (let i = 0; i < 7; i++) { const s = reg(new THREE.Mesh(new THREE.CircleGeometry(sr(0.6, 1.4), 24), stain), { cast: false }); s.rotation.x = -Math.PI / 2; s.position.set(sr(2, 28), 0.006, sr(2, 26)); s.scale.set(1, sr(0.5, 1), 1); }
-    const cardboard = tm('crate', 1, 1, 0.95); cardboard.color = new THREE.Color('#e6c590');
-    box(2, 26.5, 0.8, 0.8, 0.7, cardboard, { top: true }); box(2.7, 26.6, 0.6, 0.6, 0.5, cardboard); box(2.2, 26.4, 0.6, 0.6, 0.5, cardboard, { y: 0.7 });
-    box(34.5, 1.5, 0.9, 0.9, 0.8, cardboard, { top: true });
-    // lone office chairs
-    for (const [x, z] of [[15, 21.5], [26, 9.5]]) { cyl(x, z, 0.04, 0.04, 0.42, f_steel()); box(x, z, 0.5, 0.5, 0.08, cm('#3b3b40', 0.7), { y: 0.42 }); box(x, z - 0.22, 0.5, 0.06, 0.55, cm('#3b3b40', 0.7), { y: 0.5, collide: false }); }
-    // wet floor sign
-    { const c = reg(new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.65, 4), cm('#ffd43b', 0.6))); c.position.set(10.5, 0.33, 15); }
+    // abandoned office junk
+    for (const [x, z, s, y] of [[2, 26.5, 1.3, 0], [2.8, 26.7, 1, 0], [2.2, 26.4, 1, 0.68], [34.5, 1.5, 1.3, 0], [11.2, 1.0, 1.2, 0], [22.5, 26.8, 1.1, 0], [29.2, 13.0, 1.2, 0], [7.2, 11.2, 1.0, 0]]) prop(srand() < 0.5 ? 'f:cardboardBoxClosed' : 'f:cardboardBoxOpen', x, z, { s: s * 1.2, y, ry: sr(0, 1.5) });
+    for (const [x, z, r] of [[15, 21.5, 2.2], [26, 9.5, -0.6], [2.4, 7.5, 0.9], [33.2, 15.5, 2.8]]) prop('f:chairDesk', x, z, { ry: r });
+    for (const [x, z, r] of [[1.0, 1.4, 'e'], [18.4, 0.05, 's'], [35.0, 19.5, 'w'], [9.6, 18.8, 'w']]) { const d = prop('f:desk', x, z, { ry: r, az: r === 's' ? 'min' : undefined }); if (srand() < 0.6) prop('f:computerScreen', x, z, { ry: r, y: d.userData.wb.max.y, col: 'none' }); }
+    prop('mkt:freezers-standing', 35.9, 4.5, { h: 1.9, ry: 'w', ax: 'max' }); prop('arc:vending-machine', 0.5, 13.7, { h: 1.9, ry: 'e' });
+    prop('f:trashcan', 12.4, 15.2, { s: 0.4 }); prop('f:trashcan', 30.6, 1.0, { s: 0.4 }); prop('f:lampSquareFloor', 35.4, 11.4); prop('f:coatRackStanding', 4.6, 21.0);
+    prop('plat:sign', 10.5, 15, { h: 0.6, ry: 0.8, tint: '#ffd43b' });
     // exit sign over gate
     const exit = canvasTex(128, 48, (g, w, h) => { g.fillStyle = '#0a2a14'; g.fillRect(0, 0, w, h); g.fillStyle = '#3dff7a'; g.font = '700 30px Arial'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('EXIT', w / 2, h / 2 + 2); });
     const em = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.3), new THREE.MeshBasicMaterial({ map: exit })); em.position.set(33, 2.55, 21.88); em.rotation.y = Math.PI; mapGroup.add(em);
@@ -276,7 +293,8 @@ MAPS.sewer = {
     cyl(10.5, 2, 0.6, 0.6, 2.2, tm('rust', 3, 2, 0.6, 0.3), { collide: true });
     box(15, 0.4, 2.2, 0.5, 1.4, cm('#2e3a40', 0.5, 0.4));
     for (let i = 0; i < 6; i++) box(14.2 + i * 0.3, 0.15, 0.12, 0.02, 0.12, cm(['#ff4d4d', '#3dff7a', '#ffd23f'][i % 3], 0.3), { y: 1.0, collide: false });
-    for (const [x, z] of [[2, 6.8], [3, 6.8], [2.5, 6.8]]) cyl(x, z, 0.32, 0.32, 0.9, tm('barrel', 1, 1, 0.6, 0.2), { collide: true, top: true, y: x === 2.5 ? 0.9 : 0 });
+    prop('surv:barrel', 1.9, 7.2, { s: 2.6 }); prop('surv:barrel', 2.75, 7.2, { s: 2.6 }); prop('surv:barrel-open', 3.6, 7.2, { s: 2.6 });
+    prop('surv:workbench', 18.7, 1.2, { s: 3.2, ry: 'w' }); prop('surv:bucket', 17.6, 3.4, { s: 2.4 }); prop('surv:tool-shovel', 19.3, 4.2, { s: 3, ry: 1 });
     lamp(5, 4, 0xffd59a, 0.5, { fixture: 'bulb' }); lamp(14, 4, 0xffd59a, 0.45, { fixture: 'bulb' });
     // storage: shelving with crates
     for (const x of [24, 28, 32, 36]) {
@@ -285,23 +303,25 @@ MAPS.sewer = {
       for (const sx of [-1.25, 1.25]) box(x + sx, 0.45, 0.06, 0.7, 2.4, f_steel(), { collide: false });
       for (let k = 0; k < 3; k++) box(x - 0.8 + k * 0.8, 0.45, 0.6, 0.5, 0.5, tm('crate', 1, 1), { y: srand() < 0.5 ? 0.96 : 1.86, collide: false });
     }
-    box(30, 5.5, 1.2, 1.2, 1.2, tm('crate', 1, 1), { top: true }); box(31.3, 5.7, 1, 1, 1, tm('crate', 1, 1), { top: true });
-    for (const [x, z] of [[22, 6.8], [22.8, 6.8], [38.5, 6.8]]) cyl(x, z, 0.32, 0.32, 0.9, tm('barrel', 1, 1, 0.6, 0.2), { collide: true, top: true });
+    prop('pir:crate', 30, 5.5, { h: 1.1 }); prop('pir:crate', 31.2, 5.8, { h: 0.9, ry: 0.4 }); prop('pir:crate-bottles', 30.4, 6.9, { h: 0.7 });
+    for (const [x, z] of [[22, 7.0], [22.8, 7.1], [38.5, 7.0]]) prop('surv:barrel', x, z, { s: 2.6 });
+    prop('surv:chest', 37.5, 2.6, { s: 2.6, ry: 'w' }); prop('pir:bottle-large', 25.6, 6.6, { h: 0.5 }); prop('pir:cannon-ball', 27.0, 7.0, { h: 0.3 });
     lamp(26, 4, 0xffd59a, 0.45, { fixture: 'bulb' }); lamp(35, 4, 0xffd59a, 0.45, { fixture: 'bulb' });
     // junction: big outlet pipes + waterfall
     rotMesh(new THREE.CylinderGeometry(0.9, 0.9, 1.2, 24, 1, true), tm('rust', 3, 1, 0.6, 0.3), 9, 1.8, 23.3, Math.PI / 2, 0, 0).material.side = THREE.DoubleSide;
     plane(9, 0.9, 23.2, 1.2, 1.8, (() => { const m = tm('water', 1, 2, 0.1); m.transparent = true; m.opacity = 0.8; return m; })(), 0, Math.PI);
     box(9, 22.6, 3, 1.6, 0.25, cm('#3c6b5e', 0.15), { collide: false });
-    for (const [x, z] of [[2, 17], [3, 17], [16, 23], [16, 22.2]]) box(x, z, 0.8, 0.8, 0.8, tm('crate', 1, 1), { top: true });
+    for (const [x, z, r] of [[2, 17], [3, 17], [16, 23], [16, 22.2]]) prop('pir:crate', x, z, { h: 0.8, ry: sr(-0.2, 0.2) });
+    prop('nat:log_stack', 4.5, 22.8, { s: 1.6 }); prop('surv:rock-a', 1.4, 21.4, { s: 2.2 }); prop('surv:rock-b', 12.6, 17.2, { s: 2 });
     box(15, 17.5, 2.4, 0.6, 1.2, cm('#3d4a52', 0.5, 0.5), { top: true });
     lamp(9, 19.5, 0xbfffd8, 0.45, { fixture: 'bulb' });
     // overflow: pallets and pipes
     for (const [x, z] of [[21, 22.6], [23.2, 22.6]]) { box(x, z, 1.8, 1.1, 0.15, tm('woodLight', 1, 1, 0.9), { top: true }); box(x, z, 1.4, 0.9, 0.7, tm('crate', 2, 1), { y: 0.15, top: true }); }
     for (const z of [17, 19, 21]) cyl(31.4, z, 0.25, 0.25, 3.4, pipeM, { collide: true });
-    cyl(28, 19, 0.35, 0.35, 0.9, tm('barrel', 1, 1, 0.6, 0.2), { collide: true, top: true });
+    prop('surv:barrel', 28, 19, { s: 2.8 }); prop('pir:boat-row-small', 25, 17.4, { h: 0.7, ry: 'e' }); prop('surv:box-large-open', 19.2, 17.0, { s: 3 });
     lamp(25, 20, 0xffd59a, 0.45, { fixture: 'bulb' });
     // maintenance
-    box(39.5, 20, 0.7, 2.4, 0.9, tm('crate', 2, 1)); lamp(36, 20, 0xe8f0ff, 0.45, { fixture: 'bulb' });
+    prop('surv:workbench-anvil', 39.4, 20, { s: 3, ry: 'w' }); lamp(36, 20, 0xe8f0ff, 0.45, { fixture: 'bulb' });
     // tunnel lights
     for (const x of [4, 13, 22, 31, 39]) lamp(x, 12, 0xffd59a, 0.5, { fixture: 'bulb', y: 3.0 });
     return extra;
@@ -320,8 +340,8 @@ MAPS.sugar = {
     { id: 'e', name: 'Gumdrop Garden', x0: 28, z0: 12, x1: 40, z1: 25 }, { id: 'sw', name: 'Chocolate Maze', x0: 0, z0: 22, x1: 18, z1: 32 },
     { id: 's', name: 'Ice Cream Row', x0: 18, z0: 22, x1: 33, z1: 32 },
     { id: 'pen', name: 'Candy Jar', x0: 33, z0: 25, x1: 40, z1: 32, hunters: true, pts: [[36.5, 28.5]] },
-  ].map((z) => ({ ...z, pts: z.pts || gridPts(z.x0, z.z0, z.x1, z.z1, 3.5) })),
-  playerSpawn: [21, 16.5], hunterSpawns: [[35, 27.5], [38, 27.5], [35, 30.5], [38, 30.5]], gate: { x: 36.5, z: 25, a: 'h' },
+  ].map((z) => ({ ...z, pts: z.pts || gridPts(z.x0, z.z0, z.x1, z.z1, 2.4) })),
+  playerSpawn: [21, 20.6], hunterSpawns: [[35, 27.5], [38, 27.5], [35, 30.5], [38, 30.5]], gate: { x: 36.5, z: 25, a: 'h' },
   light: { hemi: 0.58, sky: 0xffffff, ground: 0xffc0d8, amb: 0.12, sun: 0.62, sunColor: 0xfff6e8, sunPos: [-14, 30, -9], bg: 0xbfe3ff, fog: [0xffe0f0, 45, 110] },
   build() {
     floorPlane(-20, -20, 60, 52, tm('candyFloor', 40, 36, 0.7));
@@ -393,6 +413,15 @@ MAPS.sugar = {
     box(25, 31.3, 6, 0.8, 0.9, tm('frostMint', 3, 1, 0.6), { top: true });
     // benches
     for (const [x, z] of [[17, 13], [25, 19.5]]) box(x, z, 2, 0.6, 0.45, tm('wafer', 1, 0.3, 0.8), { top: true });
+    // giant snacks: chameleons are tiny, the food is not
+    const G = [['food:cake-birthday', 35.0, 15.6, 1.5], ['food:cupcake', 38.6, 21.4, 1.6], ['food:donut-sprinkles', 30.6, 21.2, 0.45], ['food:ice-cream', 22.5, 30.4, 2.2],
+      ['food:pie', 10.8, 1.6, 0.35], ['food:sundae', 27.6, 29.6, 2.0], ['food:popsicle', 32.4, 27.8, 2.0], ['food:cookie-chocolate', 2.4, 3.0, 0.3], ['food:waffle', 13.5, 30.6, 0.2],
+      ['food:pancakes', 28.8, 18.6, 0.4], ['food:lollypop', 18.2, 25.2, 2.4], ['food:muffin', 1.8, 17.0, 1.2], ['food:donut-chocolate', 26.4, 12.4, 0.55], ['food:candy-bar', 6.0, 26.2, 0.35],
+      ['food:cherries', 33.8, 10.8, 1.0], ['food:strawberry', 29.2, 7.0, 1.0], ['food:whipped-cream', 17.6, 21.4, 1.0], ['food:frappe', 38.3, 9.4, 1.8], ['food:soda-can', 15.8, 9.2, 1.2], ['food:chocolate', 10.4, 25.6, 0.2]];
+    for (const [k, x, z, h] of G) prop(k, x, z, { h, ry: sr(0, 6.28) });
+    for (const [x, z] of [[24.6, 11.6], [12.6, 23.4], [36, 13.6]]) prop('hol:present-a-cube', x, z, { h: 0.9, ry: sr(0, 3) });
+    for (const [x, z] of [[2.2, 9.5], [16.4, 13.4], [27.4, 16.0]]) prop('hol:gingerbread-man', x, z, { h: 1.6, ry: sr(-1, 1) });
+    prop('hol:snowman-hat', 38.2, 13.4, { h: 2.0, ry: -2 }); prop('hol:nutcracker', 12.6, 14.0, { h: 2.2, ry: 0.5 });
     return [...extra, [1.4, 22.6], [1.4, 25.6], [4.5, 25.6]];
   },
 };
@@ -409,7 +438,7 @@ MAPS.gallery = {
     { id: 'sculpt', name: 'Sculpture Court', x0: 10, z0: 14, x1: 24, z1: 22, pts: [[13, 16.5], [17, 18], [21, 16.5], [13, 20.5], [21, 20.5]] },
     { id: 'storage', name: 'Storage', x0: 24, z0: 11, x1: 34, z1: 22, pts: [[29, 16.5]], hunters: true },
   ],
-  playerSpawn: [17, 7], hunterSpawns: [[27, 15], [31, 15], [27, 19], [31, 19]], gate: { x: 29, z: 11, a: 'h' },
+  playerSpawn: [17, 10.6], hunterSpawns: [[27, 15], [31, 15], [27, 19], [31, 19]], gate: { x: 29, z: 11, a: 'h' },
   light: { hemi: 0.72, sky: 0xffffff, ground: 0x8a8070, amb: 0.2, sun: 0.38, sunPos: [-5, 30, -6], bg: 0x161820 },
   build() {
     const rooms = [
@@ -430,7 +459,9 @@ MAPS.gallery = {
     // grand hall
     P(13, 0.1, 's', 2.4, 1.8, 2.2); P(17, 0.1, 's', 3.4, 2.4, 2.2); P(21, 0.1, 's', 2.4, 1.8, 2.2);
     P(13, 13.9, 'n', 2.2, 1.6, 2); P(21, 13.9, 'n', 2.2, 1.6, 2); P(10.1, 10.5, 'e', 1.6, 1.4, 2); P(23.9, 10.5, 'w', 1.6, 1.4, 2);
-    for (const x of [14, 20]) box(x, 7, 2.2, 0.6, 0.45, cm('#2d2d33', 0.6), { top: true });
+    for (const x of [14, 20]) box(x, 7, 0.6, 2.2, 0.45, cm('#2d2d33', 0.6), { top: true });
+    for (const [x, z] of [[10.6, 0.6], [23.4, 0.6], [10.6, 13.4], [23.4, 13.4]]) prop('nat:statue_column', x, z, { h: 3.2 });
+    prop('f:rugRectangle', 17, 3.0, { s: 1.8, ry: 0, col: 'none', tint: '#8a1c2b' });
     box(17, 7, 2.4, 2.4, 0.9, tm('marble', 1, 1, 0.3), { top: true });
     { const k = reg(new THREE.Mesh(new THREE.TorusKnotGeometry(0.5, 0.17, 100, 16), cm('#ef6f6c', 0.3, 0.4))); k.position.set(17, 1.75, 7); }
     // east
@@ -447,9 +478,13 @@ MAPS.gallery = {
       const m = reg(new THREE.Mesh(g, cm(['#e6e6e6', '#c9a54c', '#2d2d33', '#4f86c6', '#ef6f6c'][k], 0.35, 0.3))); m.position.set(x, 1.5, z); m.rotation.set(0.3 * k, k, 0);
     }
     P(17, 21.9, 'n', 4, 2.4, 2.1); P(23.9, 18, 'w', 1.6, 1.2, 2);
-    plant(10.7, 21.3); plant(23.3, 21.3);
+    prop('f:pottedPlant', 10.6, 21.4); prop('f:pottedPlant', 23.4, 21.4); prop('f:pottedPlant', 10.6, 14.6); prop('f:pottedPlant', 23.4, 14.6);
+    prop('nat:statue_head', 17, 15.6, { h: 2.4, ry: 's' });
+    for (const [x, z] of [[11.2, 18.5], [22.8, 18.5]]) prop('nat:statue_column', x, z, { h: 2.6 });
+    prop('nat:statue_obelisk', 17, 20.2, { h: 1.6 }); prop('nat:statue_ring', 15, 15.8, { h: 1.2, ry: 0.6 });
     // storage
-    for (const [x, z] of [[33, 13], [33, 14], [32.9, 15], [26, 21], [27, 21]]) box(x, z, 0.9, 0.9, 0.9, tm('crate', 1, 1), { top: true });
+    for (const [x, z] of [[33, 13], [33, 14], [32.9, 15], [26, 21], [27, 21]]) prop('pir:crate', x, z, { h: 0.9, ry: sr(-0.15, 0.15) });
+    prop('nat:statue_block', 30.5, 13.4, { h: 1.0 }); prop('f:cardboardBoxClosed', 25.2, 12.2, { s: 1.4 }); prop('f:lampSquareFloor', 25.0, 17.0);
     box(31, 21.3, 2.4, 0.15, 1.6, tm(TEX.paintings[5], 1, 1, 0.7), { collide: false, ry: 0 });
     for (const [x, z] of [[5, 5.5], [13.5, 4], [20.5, 4], [13.5, 10.5], [20.5, 10.5], [29, 5.5], [17, 18]]) glowPanel(x, z, 2.2, 0.8, 0xffffff);
     for (const [x, z, i] of [[5, 5.5, 0.6], [17, 4, 0.55], [17, 10.5, 0.55], [29, 5.5, 0.6], [17, 18, 0.6], [29, 16.5, 0.45]]) lamp(x, z, 0xfffaf0, i, { fixture: false, dist: 14 });
@@ -546,12 +581,13 @@ MAPS.lobby = {
     // podium (south)
     for (const [x, h, c] of [[13, 0.9, '#ffd43b'], [11.4, 0.6, '#c9d1e0'], [14.6, 0.4, '#e8a87c']]) box(x, 20, 1.6, 1.6, h, cm(c, 0.5, 0.2), { top: true });
     // lounge (south-west) + arcade cabinets
-    box(3.5, 20.6, 4, 1, 0.45, cm('#ff7ab3', 0.9), { top: true }); box(3.5, 21.3, 4, 0.3, 0.95, cm('#e0609a', 0.9));
-    box(3.5, 18.6, 1.6, 0.9, 0.42, cm('#2d3550', 0.6), { top: true });
-    for (const x of [8, 9.2]) { box(x, 21.3, 1, 0.8, 1.9, cm('#4da3ff', 0.5)); const scr = new THREE.Mesh(new THREE.PlaneGeometry(0.75, 0.55), new THREE.MeshBasicMaterial({ color: x > 8.5 ? 0xff7ab3 : 0x3ad49c })); scr.position.set(x, 1.45, 20.89); scr.rotation.y = Math.PI; mapGroup.add(scr); }
+    prop('f:loungeDesignSofa', 3.5, 21.95, { ry: 'n', az: 'max', tint: '#ff7ab3' }); prop('f:tableCoffeeGlass', 3.5, 19.0);
+    prop('arc:arcade-machine', 7.6, 21.95, { h: 1.9, ry: 'n', az: 'max' }); prop('arc:arcade-machine', 8.7, 21.95, { h: 1.9, ry: 'n', az: 'max' }); prop('arc:pinball', 10.2, 21.95, { h: 1.3, ry: 'n', az: 'max' });
+    prop('arc:claw-machine', 0.05, 19.0, { h: 2.0, ry: 'e', ax: 'min' }); prop('arc:vending-machine', 0.05, 16.8, { h: 1.9, ry: 'e', ax: 'min' });
+    prop('arc:air-hockey', 9.0, 18.4, { h: 0.9, ry: 'e' }); prop('arc:dance-machine', 25.9, 2.0, { h: 1.6, ry: 'w', ax: 'max' });
     // paint buckets
     ['#ff5d6c', '#ffd43b', '#3ad49c', '#4da3ff', '#b197fc'].forEach((c, i) => { cyl(16.5 + i * 0.75, 20.9, 0.3, 0.26, 0.5, cm('#d8dde6', 0.4, 0.5), { collide: true, top: true }); cyl(16.5 + i * 0.75, 20.9, 0.27, 0.27, 0.02, cm(c, 0.3), { y: 0.5, collide: false }); });
-    plant(1, 1); plant(25, 1); plant(1, 21); plant(20.5, 1.2);
+    for (const [x, z] of [[0.7, 0.7], [25.3, 0.7], [0.7, 21.3], [20.5, 0.8]]) prop('f:pottedPlant', x, z, { s: 1.3 });
     for (const [x, z] of [[6, 6], [13, 6], [20, 6], [6, 15], [13, 15], [18, 18]]) lamp(x, z, 0xfff3e0, 0.5, { dist: 12 });
     lamp(13, 10.5, 0x3ad49c, 0.6, { dist: 6, y: 2.5, fixture: false });
     return extra;

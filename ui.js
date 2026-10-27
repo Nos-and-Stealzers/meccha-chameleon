@@ -53,6 +53,14 @@ function toast(msg, kind = '') {
   $('#toasts').appendChild(el); setTimeout(() => el.remove(), 3200);
   while ($('#toasts').children.length > 4) $('#toasts').firstChild.remove();
 }
+let bannerT = null;
+function banner(kicker, title, sub = '', cls = '', dur = 2200) {
+  const b = $('#banner'); clearTimeout(bannerT);
+  b.className = cls; b.querySelector('.bk').textContent = kicker; b.querySelector('.bk').style.display = kicker ? '' : 'none';
+  b.querySelector('.bt').textContent = title; b.querySelector('.bs').textContent = sub;
+  void b.offsetWidth; b.classList.add('show');
+  bannerT = setTimeout(() => { b.classList.add('out'); bannerT = setTimeout(() => (b.className = 'hidden'), 300); }, dur);
+}
 function feed(html, kind = '') {
   const el = document.createElement('div'); el.className = 'feeditem ' + kind; el.innerHTML = html;
   $('#feed').prepend(el); setTimeout(() => el.classList.add('out'), 7000); setTimeout(() => el.remove(), 7600);
@@ -386,6 +394,12 @@ const UI = {
     $('#againBtn').textContent = R.online ? 'Back to lobby' : 'Play again';
     $('#menuBtn').textContent = R.online ? 'Leave server' : 'Menu';
     this.hud(false); this.screen('end');
+    clearInterval(this.autoBackT); $('#endAuto')?.remove();
+    if (R.online) {
+      let n = 15; const el = document.createElement('div'); el.id = 'endAuto'; el.className = 'autoback'; $('.endscreen').appendChild(el);
+      const tick = () => { el.textContent = `Back to the lobby in ${n}s`; if (n-- <= 0) { clearInterval(this.autoBackT); if (G.phase === 'end' && G.online) backToHub(); } };
+      tick(); this.autoBackT = setInterval(tick, 1000);
+    }
   },
 
   /* ---------- chat ---------- */
@@ -633,8 +647,8 @@ function wire() {
   $('#fsBtn').onclick = () => (window.mcNative ? mcNative.fullscreen() : document.documentElement.requestFullscreen?.());
   // round flow
   $('#handGo').onclick = () => G.handGo();
-  $('#againBtn').onclick = () => { if (G.online) backToHub(); else if (G.party) G.startParty(UI.playlist.humans, UI.playlist.ai, UI.playlist.map, UI.playlist.diff); else G.startSolo(); };
-  $('#menuBtn').onclick = () => G.toMenu();
+  $('#againBtn').onclick = () => { clearInterval(UI.autoBackT); if (G.online) backToHub(); else if (G.party) G.startParty(UI.playlist.humans, UI.playlist.ai, UI.playlist.map, UI.playlist.diff); else G.startSolo(); };
+  $('#menuBtn').onclick = () => { clearInterval(UI.autoBackT); G.toMenu(); };
   $('#revealBtn').onclick = () => G.startReveal();
   $('#resumeBtn').onclick = () => { G.paused = false; UI.screen(null); G.lock(); };
   $('#pauseSettings').onclick = () => openSettings('pause');
@@ -738,6 +752,7 @@ function makePoseThumbs() {
   wire();
   UI.loading(true, 'Starting…');
   $('#loadTitle').textContent = 'Meccha Chameleon'; $('#loadKicker').textContent = 'Starting up';
+  try { await loadModels(); } catch (e) { console.warn('models', e); }
   try { await makeThumbs(); } catch (e) { console.warn('thumbs', e); }
   try { makePoseThumbs(); } catch (e) { console.warn('pose thumbs', e); }
   showMenuScene();

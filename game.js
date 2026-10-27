@@ -192,22 +192,28 @@ function findSpot(ch, taken) {
     let s = null;
     if (roll < 0.5) {
       const x = rand(zn.x0 + 0.5, zn.x1 - 0.5), z = rand(zn.z0 + 0.5, zn.z1 - 0.5);
-      if (!freeAt(x, z, 0.3, 1.5)) continue;
+      if (!freeAt(x, z, 0.22, 0.9)) continue;
       const pose = Math.random() < 0.3 ? 'star' : 'flat';
       ch.root.position.set(x, 0, z); ch.setPose(pose, true);
       if (!snapToWall(ch, 2.5)) continue;
       s = { x: ch.root.position.x, y: 0, z: ch.root.position.z, yaw: ch.yaw, pose };
-      if (!freeAt(s.x, s.z, 0.14, 1.4)) continue;
-      if (pose === 'star') { const sd = new V3(Math.cos(s.yaw), 0, -Math.sin(s.yaw)); if (!freeAt(s.x + sd.x * 0.45, s.z + sd.z * 0.45, 0.1, 1.3) || !freeAt(s.x - sd.x * 0.45, s.z - sd.z * 0.45, 0.1, 1.3)) continue; }
+      if (!freeAt(s.x, s.z, 0.1, 0.85)) continue;
+      if (pose === 'star') { const sd = new V3(Math.cos(s.yaw), 0, -Math.sin(s.yaw)); if (!freeAt(s.x + sd.x * 0.3, s.z + sd.z * 0.3, 0.08, 0.8) || !freeAt(s.x - sd.x * 0.3, s.z - sd.z * 0.3, 0.08, 0.8)) continue; }
     } else if (roll < 0.78) {
       const ts = tops.filter((t) => t.zone === zn.id && t.w > 0.7 && t.d > 0.5);
       if (!ts.length) continue;
       const t = pick(ts), long = Math.max(t.w, t.d) > 1.6;
       s = { x: t.x + rand(-1, 1) * Math.max(0, t.w / 2 - (long && t.w > t.d ? 0.8 : 0.4)), y: t.y, z: t.z + rand(-1, 1) * Math.max(0, t.d / 2 - (long && t.d >= t.w ? 0.8 : 0.35)), yaw: long ? (t.w > t.d ? Math.PI / 2 : 0) + (Math.random() < 0.5 ? Math.PI : 0) : rand(0, 6.28), pose: long ? pick(['lie', 'prone', 'side']) : pick(['curl', 'sit', 'thinker', 'curl']) };
-      if (!freeAt(s.x, s.z, 0.3, 0.9, t.y + 0.01)) continue;
-    } else if (roll < 0.93) {
+      if (!freeAt(s.x, s.z, 0.22, 0.6, t.y + 0.01)) continue;
+    } else if (roll < 0.86) {
+      const us = unders.filter((u) => u.zone === zn.id && u.h > 0.45);
+      if (!us.length) continue;
+      const u = pick(us);
+      s = { x: u.x + rand(-0.25, 0.25) * u.w, y: 0, z: u.z + rand(-0.25, 0.25) * u.d, yaw: rand(0, 6.28), pose: u.h > 0.62 ? pick(['curl', 'sit', 'crouch']) : pick(['curl', 'lie']) };
+      if (!freeAt(s.x, s.z, 0.2, 0.4)) continue;
+    } else if (roll < 0.95) {
       s = { x: rand(zn.x0 + 0.9, zn.x1 - 0.9), y: 0, z: rand(zn.z0 + 0.9, zn.z1 - 0.9), yaw: rand(0, 6.28), pose: pick(FLOOR_POSES) };
-      if (!freeAt(s.x, s.z, 0.65, 1.2)) continue;
+      if (!freeAt(s.x, s.z, 0.45, 0.8)) continue;
     } else {
       const sp = (MAP.specials || []).filter((p) => p.zone === zn.id);
       if (!sp.length) continue;
@@ -224,6 +230,8 @@ function findSpot(ch, taken) {
 
 /* ================= hunters ================= */
 const VW = 128, VH = 96;
+/* Chameleons used to be 1.3 m tall; detection is pixel-area based, so scale it back up for the smaller body. */
+const AREA_COMP = (1.3 / CHAM_H) ** 2;
 const visRT = new THREE.WebGLRenderTarget(VW, VH);
 const visCam = new THREE.PerspectiveCamera(78, VW / VH, 0.1, 30);
 const bufA = new Uint8Array(VW * VH * 4), bufB = new Uint8Array(VW * VH * 4);
@@ -311,7 +319,7 @@ class Hunter {
       const tp = this.focus.root.position;
       this.repathT -= dt;
       if (this.repathT <= 0) { this.goTo(tp.x, tp.z); this.repathT = 0.6; }
-      this.follow(dt, D.huntSpeed * 1.35);
+      this.follow(dt, D.huntSpeed * 1.35 * (G.overtime ? 1.2 : 1));
       const d = Math.hypot(tp.x - this.pos.x, tp.z - this.pos.z);
       this.faceTo(this.focus.center(), dt);
       if (d < 1.35 && Math.abs(tp.y - this.pos.y) < 2.2 && this.swing <= 0) { this.doSwing(); G.hostTag(this.focus.id, this.id); this.sus.delete(this.focus); this.focus = null; this.state = 'scan'; this.scanT = 1.5; }
@@ -321,7 +329,7 @@ class Hunter {
       this.faceTo(c, dt);
       if ((this.sus.get(this.focus) || 0) < 0.15) { this.focus = null; this.pickGoal(); }
     } else if (this.state === 'patrol') {
-      if (!this.path.length) { this.state = 'scan'; this.scanT = rand(1.6, 3.2); } else this.follow(dt, D.huntSpeed);
+      if (!this.path.length) { this.state = 'scan'; this.scanT = rand(1.6, 3.2) * (G.overtime ? 0.6 : 1); } else this.follow(dt, D.huntSpeed * (G.overtime ? 1.25 : 1));
       this.look = this.yaw + Math.sin(this.t * 1.3 + this.id.length) * 0.6; this.pitch = -0.18 + Math.sin(this.t * 0.8) * 0.12;
     } else if (this.state === 'scan') {
       this.scanT -= dt; this.look = this.yaw + Math.sin(this.t * 1.7) * 1.2; this.pitch = -0.25 + Math.sin(this.t * 1.1) * 0.2;
@@ -381,8 +389,8 @@ class Hunter {
         }
         if (vis < 2) continue;
         seen.add(t);
-        let gain = s * D.K * dt;
-        if (t.speed > 0.4) gain += D.motion * dt * Math.min(1, vis / 30);
+        let gain = s * D.K * dt * AREA_COMP;
+        if (t.speed > 0.4) gain += D.motion * dt * Math.min(1, vis * AREA_COMP / 30);
         gains.set(t, gain);
         this.sus.set(t, (this.sus.get(t) || 0) + gain);
       }
@@ -406,7 +414,7 @@ const G = {
   online: false, isHost: true, myId: 'me',
   hiders: [], hunters: [], my: null, myHunter: null, fp: null, fxHide: [],
   view: 'third', paint: false, paused: false,
-  ctrl: { yaw: 0, pitch: 0.35, dist: 3.4 }, paintCam: { yaw: 0, pitch: 0.2, dist: 2.6 },
+  ctrl: { yaw: 0, pitch: 0.32, dist: 2.3 }, paintCam: { yaw: 0, pitch: 0.2, dist: 1.7 },
   stats: {}, ab: {}, specIdx: 0, fx: [], labels: [], balls: [], splats: [], rings: [], bubbles: [],
   solo: { kind: 'hide', map: 'mansion', diff: 'normal' }, party: null,
   lobby: { players: new Map(), settings: { map: 'mansion', mode: 'classic', hunters: 'auto', aiHunters: 1, aiHiders: 2, prep: 60, hunt: 180, diff: 'normal' }, chat: [], inGame: false },
@@ -505,8 +513,9 @@ const G = {
     UI.loading(false); UI.screen(null); UI.hubHud(false);
     this.setPhase('prep', P.cfg.prep);
     UI.status();
-    if (this.my) toast('Click to look around · F to paint · R for poses · Enter when ready', 'good');
-    else if (this.fp) toast('You are a hunter. Wait for the gate…', 'warn');
+    this.lastCount = null; this.overtime = false; this.lastStand = false;
+    if (this.my) banner(MAPS[P.map].name, 'Chameleon', `Paint yourself and hide. Hunters are released in ${P.cfg.prep}s.`, 'hider', 3200);
+    else if (this.fp) banner(MAPS[P.map].name, 'Hunter', 'Wait for the gate, then find every chameleon.', 'hunter', 3200);
     feed(`<b>${esc(MAPS[P.map].name)}</b> · ${P.mode === 'infection' ? 'Infection' : 'Classic'}`, 'sys');
     this.lock();
   },
@@ -520,7 +529,7 @@ const G = {
       this.stats.start = this.t;
       if (this.isHost) for (const h of this.hunters) if (h.ai) h.pickGoal();
       if (this.paint) togglePaint();
-      toast(this.view === 'first' ? 'Go! Find them all.' : 'The hunters are coming. Freeze!', 'warn');
+      banner('', this.view === 'first' ? 'Hunt!' : 'Freeze!', this.view === 'first' ? 'Find them all.' : 'The hunters are coming.', this.view === 'first' ? 'hunter' : 'hider', 1600);
       feed('The gate is open', 'warn');
     }
     UI.refreshBars();
@@ -631,8 +640,15 @@ const G = {
         if (by && by === this.myHunter) this.stats.finds++;
         feed(`<b>${esc(by ? by.name : 'A hunter')}</b> found <b>${esc(c.name)}</b>`, 'bad');
         if (c === this.my) {
-          if (this.P.mode !== 'infection') { toast(`${by ? by.name : 'A hunter'} found you!`, 'bad'); Sound.lose(); this.view = 'spec'; this.specIdx = 0; if (this.paint) togglePaint(); UI.wheel(false); }
+          if (this.P.mode !== 'infection') { banner(by ? by.name + ' found you' : 'Found', 'Caught!', 'Spectating. 1-9 to switch hunters.', 'hunter', 2000); Sound.lose(); this.view = 'spec'; this.specIdx = 0; if (this.paint) togglePaint(); UI.wheel(false); }
         } else if (by?.local) toast(`You found ${c.name}!`, 'good');
+        {
+          const alive = this.realHiders().filter((x) => !x.caught);
+          if (alive.length === 1 && this.realHiders().length > 2 && !this.lastStand) {
+            this.lastStand = true;
+            banner('One chameleon left', alive[0] === this.my ? 'Last one standing' : alive[0].name, alive[0] === this.my ? 'It all comes down to you.' : 'Find them before time runs out!', alive[0] === this.my ? 'hider' : 'warn', 2400);
+          }
+        }
         UI.status(); break;
       }
       case 'clonehit': {
@@ -1066,7 +1082,7 @@ function updateMenuScene(dt) {
   if (menuPoseT > 3.2) { menuPoseT = 0; menuPoseI = (menuPoseI + 1) % MENU_CYCLE.length; const k = MENU_CYCLE[menuPoseI]; if (POSES[k].emote) menuDoll.setEmote(k); else menuDoll.setPose(k); }
   menuDoll.animate(dt, false);
   const sw = Math.sin(menuT * 0.25) * 0.5;
-  camera.position.set(12.0 + sw * 0.6, 1.35, 15.1); camera.lookAt(12.75 + sw * 0.2, 0.82, 11.2);
+  camera.position.set(13.75 + sw * 0.35, 0.62, 12.75); camera.lookAt(13.62 + sw * 0.05, 0.43, 11.2);
 }
 
 /* ================= effects ================= */
@@ -1294,8 +1310,8 @@ renderer.domElement.addEventListener('pointerdown', (e) => {
 addEventListener('pointerup', () => { mouse.down = false; mouse.right = false; mouse.lastUV = null; });
 renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
 renderer.domElement.addEventListener('wheel', (e) => {
-  if (G.paint) G.paintCam.dist = clamp(G.paintCam.dist + Math.sign(e.deltaY) * 0.25, 1.2, 7);
-  else if (G.view === 'third' || G.view === 'spec') G.ctrl.dist = clamp(G.ctrl.dist + Math.sign(e.deltaY) * 0.3, 1.6, 7);
+  if (G.paint) G.paintCam.dist = clamp(G.paintCam.dist + Math.sign(e.deltaY) * 0.18, 0.8, 5);
+  else if (G.view === 'third' || G.view === 'spec') G.ctrl.dist = clamp(G.ctrl.dist + Math.sign(e.deltaY) * 0.25, 1.0, 6);
 }, { passive: true });
 
 /* ---------- painting ---------- */
@@ -1345,7 +1361,7 @@ function togglePaint() {
   G.paint = !G.paint;
   if (G.paint) { G.my.setPose(G.my.pose === 'stand' || POSES[G.my.pose].move ? G.my.pose : G.my.pose); G.my.emote = null; G.my.rebake(); }
   UI.paintPanel(G.paint); UI.wheel(false);
-  if (G.paint) { G.paintCam.yaw = G.ctrl.yaw; G.paintCam.pitch = 0.15; G.paintCam.dist = 2.6; if (document.pointerLockElement) document.exitPointerLock(); }
+  if (G.paint) { G.paintCam.yaw = G.ctrl.yaw; G.paintCam.pitch = 0.15; G.paintCam.dist = 1.7; if (document.pointerLockElement) document.exitPointerLock(); }
   else G.lock();
 }
 
@@ -1375,11 +1391,11 @@ function updateMyCham(dt) {
     if (moving) {
       const y = G.ctrl.yaw, fx = -Math.sin(y), fz = -Math.cos(y), rx = Math.cos(y), rz = -Math.sin(y);
       let vx = fx * -mz + rx * mx, vz = fz * -mz + rz * mx; const l = Math.hypot(vx, vz); vx /= l; vz /= l;
-      const sp = (keys.ShiftLeft || keys.ShiftRight ? 1.6 : 4.2) * (POSES[P.pose].speed || 1) * (P.size === 'petite' ? 0.85 : 1);
+      const sp = (keys.ShiftLeft || keys.ShiftRight ? 1.3 : 3.7) * (POSES[P.pose].speed || 1) * (P.size === 'petite' ? 0.85 : 1);
       P.root.position.x += vx * sp * dt; P.root.position.z += vz * sp * dt;
       P.setYaw(P.yaw + angDiff(P.yaw, Math.atan2(vx, vz)) * Math.min(1, dt * 12));
     }
-    if (keys.Space && P.body.onGround && POSES[P.pose].move) { P.body.vy = 6.4; P.body.onGround = false; Sound.jump(); }
+    if (keys.Space && P.body.onGround && POSES[P.pose].move) { P.body.vy = 6.1; P.body.onGround = false; Sound.jump(); }
   }
   const wasMoving = P.wasMoving; P.wasMoving = moving;
   if (wasMoving && !moving) P.rebake();
@@ -1427,7 +1443,7 @@ function updateCamera(dt) {
   }
   const P = G.my; if (!P) return;
   if (G.paint) thirdCam(P.center(), G.paintCam.yaw, G.paintCam.pitch, G.paintCam.dist, dt, true);
-  else { camTarget.copy(P.root.position); camTarget.y += Math.max(0.5, Math.min(P.body.h, 1.3) * 0.95); thirdCam(camTarget, G.ctrl.yaw, G.ctrl.pitch, G.ctrl.dist, dt, false); }
+  else { camTarget.copy(P.root.position); camTarget.y += Math.max(0.32, Math.min(P.body.h, CHAM_H) * 0.95); thirdCam(camTarget, G.ctrl.yaw, G.ctrl.pitch, G.ctrl.dist, dt, false); }
 }
 let lastTickSec = -1, hudT = 0;
 function update(dt) {
@@ -1455,6 +1471,14 @@ function update(dt) {
     c.speed = c.lastPos ? c.root.position.distanceTo(c.lastPos) / Math.max(dt, 1e-4) : 0;
     c.lastPos = (c.lastPos || new V3()).copy(c.root.position);
   }
+  if (G.phase === 'prep' && G.timer <= 3.2 && G.timer > 0) {
+    const n = Math.ceil(G.timer);
+    if (n !== G.lastCount) { G.lastCount = n; banner('Hunt starts in', String(n), '', 'count', 800); }
+  }
+  if (G.phase === 'hunt' && !G.overtime && G.timer <= 30 && G.phaseLen > 45) {
+    G.overtime = true; banner('30 seconds left', 'Overtime', G.my && !G.my.caught ? 'Hunters move faster. Hold still!' : 'Hunters move faster. Finish the job!', 'warn', 2200); Sound.alert(null);
+  }
+  $('#timer').classList.toggle('overtime', G.phase === 'hunt' && !!G.overtime);
   if (G.isHost) {
     if (G.phase === 'prep' && G.timer <= 0) G.finishPrep();
     else if (G.phase === 'hunt') {
@@ -1487,8 +1511,9 @@ function frame(now) { const dt = Math.min(0.05, (now - last) / 1000); last = now
 setInterval(() => {
   const now = performance.now();
   if (now - last < 250 || G.phase === 'boot') return;
-  const dt = Math.min(0.1, (now - last) / 1000); last = now;
-  update(dt); for (const c of G.hiders) c.flush();
+  let left = Math.min(2, (now - last) / 1000); last = now;
+  while (left > 1e-4) { const dt = Math.min(0.05, left); left -= dt; update(dt); }
+  for (const c of G.hiders) c.flush();
 }, 100);
 
 /* ================= map thumbnails (rendered once at boot) ================= */

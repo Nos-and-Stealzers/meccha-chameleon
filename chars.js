@@ -32,7 +32,7 @@ const RIG = (() => {
   }
   return { D, pos, uv, sw, si, idx, B, NAME, attrs, parents, order, count: pos.length / 3, texelsPerUnit: Math.sqrt(uvArea * TS * TS / area) };
 })();
-const CHAM_H = 1.3;                       // standing height (m) of a normal chameleon
+const CHAM_H = 0.8;                       // standing height (m) of a normal chameleon
 const HUNTER_H = 1.78;
 /* Old brush/dot sizes were tuned for ~118 px per metre. */
 const PSCALE = RIG.texelsPerUnit / CHAM_H / 118;
@@ -293,7 +293,7 @@ class Cham {
     this.pickMat = new THREE.MeshBasicMaterial({ visible: false });
     this.root = new THREE.Group(); (parent || scene).add(this.root);
     this.shape = SHAPES[shape] ? shape : 'classic'; this.size = 'normal'; this.pose = 'stand'; this.yaw = 0; this.emote = null; this.emoteT = 0;
-    this.body = { pos: this.root.position, vy: 0, onGround: true, r: 0.22, h: CHAM_H };
+    this.body = { pos: this.root.position, vy: 0, onGround: true, r: 0.15, h: CHAM_H };
     this.caught = false; this.isClone = false; this.painted = false; this.speed = 0; this.walkT = 0; this.walkAmt = 0; this.texVer = 0; this.t = Math.random() * 10;
     this.target = null; this.baseY = 0; this.curBaseY = 0; this.dims = new V3(0.4, CHAM_H, 0.3); this.bbCenter = new V3(0, CHAM_H / 2, 0);
     this.blank();
@@ -327,8 +327,8 @@ class Cham {
     const bb = rig.pickGeo.boundingBox.clone().applyMatrix4(rig.group.matrix);
     this.baseY = -bb.min.y; this.dims = bb.getSize(new V3()); this.bbCenter = bb.getCenter(new V3()); this.bbCenter.y += this.baseY;
     this.body.h = this.dims.y;
-    this.body.r = clamp(Math.min(this.dims.x, this.dims.z) / 2, 0.13, 0.36);
-    if (def.wall) this.body.r = Math.min(this.body.r, 0.16);
+    this.body.r = clamp(Math.min(this.dims.x, this.dims.z) / 2, 0.09, 0.24);
+    if (def.wall) this.body.r = Math.min(this.body.r, 0.11);
     if (snap) { this.curBaseY = this.baseY; rig.group.position.y = this.baseY; }
     else { rig.bones.forEach((b, i) => b.quaternion.copy(keep[i])); rig.rootQ.copy(keepRoot); rig.group.quaternion.copy(keepRoot); }
     this.target_ = T;
