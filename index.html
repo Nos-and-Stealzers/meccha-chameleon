@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>peperhide</title>
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="editor.css">
 </head>
 <body class="in-menu">
 <div id="app"></div>
@@ -27,6 +28,7 @@
       <button data-page="servers">Servers</button>
       <button data-page="locker">Locker</button>
       <button data-page="career">Career</button>
+      <button data-page="editor" title="Edit the maps">Editor</button>
     </nav>
     <div class="right">
       <div class="pchip" id="pchip" title="Career">
@@ -135,6 +137,60 @@
 </div>
 
 <!-- ================= MODALS ================= -->
+<!-- ================= MAP EDITOR (editor.js) ================= -->
+<section id="editor" class="hidden">
+  <header class="ed-top">
+    <div class="ed-brand"><span class="b1">peper</span><span class="b2">hide</span><em>Map editor</em></div>
+    <select id="edMap" title="Map"></select>
+    <div class="ed-seg" id="edMode">
+      <button data-m="translate" data-edico="move" title="Move (W)">Move</button>
+      <button data-m="rotate" data-edico="rotate" title="Rotate (E)">Rotate</button>
+      <button data-m="scale" data-edico="scale" title="Scale (R)">Scale</button>
+    </div>
+    <button class="ed-btn" id="edSpace" data-edico="globe" title="World or local axes (X)">World</button>
+    <button class="ed-btn" id="edSnap" data-edico="magnet" title="Snap to 0.25 m / 15 degrees (hold Ctrl to flip)">Snap</button>
+    <button class="ed-btn on" id="edCeil" data-edico="roof" title="Hide ceilings so you can see into rooms from above">Ceilings off</button>
+    <div class="ed-seg">
+      <button id="edUndo" data-edico="undo" title="Undo (Ctrl+Z)"></button>
+      <button id="edRedo" data-edico="redo" title="Redo (Ctrl+Y)"></button>
+    </div>
+    <span class="grow"></span>
+    <span class="ed-status clean" id="edStatus">Original map</span>
+    <div class="ed-pop">
+      <button class="ed-btn" id="edTest" data-edico="play" title="Play this map with your unsaved changes">Play test</button>
+      <div class="ed-menu hidden" id="edTestMenu">
+        <button data-k="hide"><b>Hide</b><small>You hide, AI hunters search</small></button>
+        <button data-k="seek"><b>Seek</b><small>You hunt AI chameleons</small></button>
+      </div>
+    </div>
+    <button class="ed-primary" id="edSave" data-edico="save" title="Save (Ctrl+S)">Save</button>
+    <button class="ed-btn" id="edExit" data-edico="exit">Exit</button>
+  </header>
+  <aside class="ed-left">
+    <nav class="ed-tabs" id="edTabs"><button data-t="models" class="on">Models</button><button data-t="blocks">Blocks</button><button data-t="changes">Map file</button></nav>
+    <div id="ed-models" class="ed-pane">
+      <input id="edSearch" type="search" placeholder="Search models">
+      <div class="ed-chips" id="edCats"></div>
+      <div class="ed-grid" id="edGrid"></div>
+      <p class="ed-foot">Click to place in front of the camera, or drag onto the map.</p>
+    </div>
+    <div id="ed-blocks" class="ed-pane hidden">
+      <div class="ed-card">
+        <div class="ed-title"><b>Block</b><small>A solid box. Walls, platforms, cover, steps.</small></div>
+        <div class="ed-row three"><label>Size (m)</label><span class="ax x"><b>W</b><input id="edBlkW" type="number" value="1" step="0.1" min="0.05"></span><span class="ax y"><b>H</b><input id="edBlkH" type="number" value="1" step="0.1" min="0.05"></span><span class="ax z"><b>D</b><input id="edBlkD" type="number" value="1" step="0.1" min="0.05"></span></div>
+        <div class="ed-row"><label>Colour</label><input id="edBlkCol" type="color" value="#d9d4c7"></div>
+        <div class="ed-row"><label>Texture</label><select id="edBlkTex"></select></div>
+        <div class="ed-actions"><button class="ed-tile wide" id="edBlockTile" draggable="true" data-edico="cube">Drag onto map</button><button class="ed-primary" id="edAddBlock">Add block</button></div>
+      </div>
+      <p class="ed-foot">Tip: hiders paint themselves to match surfaces, so plain bright blocks are hard to hide on. Textured ones give them something to copy.</p>
+    </div>
+    <div id="ed-changes" class="ed-pane hidden"><div id="edChanges"></div></div>
+  </aside>
+  <aside class="ed-right"><div id="edInspector"></div></aside>
+  <div class="ed-hint"><kbd>RMB</kbd>+<kbd>WASD</kbd> fly <kbd>Q</kbd><kbd>E</kbd> down/up <kbd>Wheel</kbd> zoom <kbd>W</kbd><kbd>E</kbd><kbd>R</kbd> move/rotate/scale <kbd>F</kbd> focus <kbd>Del</kbd> delete <kbd>Ctrl+D</kbd> duplicate</div>
+  <div class="ed-modal hidden" id="edModal"></div>
+</section>
+
 <section id="screen-settings" class="modal hidden">
   <div class="settings glass">
     <aside class="settabs" id="setTabs">
@@ -316,6 +372,10 @@
 <script src="chars.js"></script>
 <script src="net.js"></script>
 <script src="game.js"></script>
+<script src="TransformControls.js"></script>
+<script src="mapedits.js"></script>
+<script src="editcore.js"></script>
+<script src="editor.js"></script>
 <script src="ui.js"></script>
 </body>
 </html>

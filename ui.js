@@ -618,7 +618,7 @@ function closeSettings() { $('#screen-settings').classList.add('hidden'); if (UI
 /* ================= wiring ================= */
 function wire() {
   $$('[data-ico]').forEach((el) => el.insertAdjacentHTML('afterbegin', ico(el.dataset.ico)));
-  $('#navTabs').onclick = (e) => { const b = e.target.closest('button'); if (b) UI.go(b.dataset.page); };
+  $('#navTabs').onclick = (e) => { const b = e.target.closest('button'); if (!b) return; if (b.dataset.page === 'editor') { Sound.click(); MapEditor.enter(UI.playlist?.map); } else UI.go(b.dataset.page); };
   $('#pchip').onclick = () => UI.go('career');
   $('#navSettings').onclick = () => openSettings('menu');
   $('#navQuit').onclick = () => (window.mcNative ? mcNative.quit() : window.close());
@@ -782,5 +782,6 @@ function makePoseThumbs() {
   G.phase = 'menu';
   UI.screen('menu');
   requestAnimationFrame(frame);
+  try { if (window.mcNative?.flags && (await mcNative.flags()).editor) MapEditor.enter(); } catch (e) { console.warn('editor flag', e); }
 })();
 window.__mc = { G, scene, camera, renderer, autoCamo, Cham, Hunter, findSpot, env, colliders, bonk, togglePaint, paintAt, UI, Net, loadMap, enterHub, shootPaint, hunterPing, decoy, quickMatch, step: (dt, n = 1) => { for (let i = 0; i < n; i++) step(dt); } };

@@ -500,9 +500,23 @@ function tm(key, rx = 1, ry = 1, rough = 0.85, metal = 0) {
   return m;
 }
 const cm = (hex, rough = 0.85, metal = 0) => new THREE.MeshStandardMaterial({ color: hex, roughness: rough, metalness: metal });
-function reg(m, o = {}) { m.castShadow = o.cast !== false; m.receiveShadow = true; mapGroup.add(m); env.push(m); return m; }
-function addCollider(x0, y0, z0, x1, y1, z1) { const b = new THREE.Box3(new V3(x0, y0, z0), new V3(x1, y1, z1)); colliders.push(b); return b; }
-function addTop(x, z, w, d, y) { const zn = zoneAt(x, z); tops.push({ x, z, w, d, y, zone: zn ? zn.id : null }); }
+/* While a map builds, colliders and hide-tops are linked to the object placed just before them so the map editor
+   can move or delete them together. */
+let _mapTrack = false, _lastMapObj = null;
+const OBJ_PHYS = new WeakMap();   // object -> { cols, tops, unders, light } (kept out of userData so clone() stays safe)
+function physOf(o) { let m = OBJ_PHYS.get(o); if (!m) OBJ_PHYS.set(o, (m = { cols: [], tops: [], unders: [], light: null })); return m; }
+function trackObj(o) { if (_mapTrack) _lastMapObj = o; return o; }
+function reg(m, o = {}) { m.castShadow = o.cast !== false; m.receiveShadow = true; mapGroup.add(m); env.push(m); return trackObj(m); }
+function addCollider(x0, y0, z0, x1, y1, z1) {
+  const b = new THREE.Box3(new V3(x0, y0, z0), new V3(x1, y1, z1)); colliders.push(b);
+  if (_mapTrack && _lastMapObj) physOf(_lastMapObj).cols.push(b);
+  return b;
+}
+function addTop(x, z, w, d, y) {
+  const zn = zoneAt(x, z), t = { x, z, w, d, y, zone: zn ? zn.id : null }; tops.push(t);
+  if (_mapTrack && _lastMapObj) physOf(_lastMapObj).tops.push(t);
+  return t;
+}
 function box(x, z, w, d, h, mat, o = {}) {
   const y = o.y || 0;
   const m = reg(new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat), o);
@@ -558,12 +572,13 @@ function lamp(x, z, color = 0xffe2b8, intensity = 0.55, o = {}) {
     const geo = o.fixture === 'bulb' ? new THREE.SphereGeometry(0.1, 12, 8) : o.fixture === 'panel' ? new THREE.BoxGeometry(1.2, 0.04, 0.6) : new THREE.CylinderGeometry(0.28, 0.18, 0.12, 20);
     const fix = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: o.fixColor || 0xfff4dc }));
     fix.position.set(x, o.fixture === 'bulb' ? y : MAP.ceilH - 0.07, z); mapGroup.add(fix);
+    physOf(fix).light = l; l.userData.hasFixture = true; trackObj(fix);
   }
   return l;
 }
 function glowPanel(x, z, w = 1.2, d = 0.6, color = 0xfffbe6) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, 0.04, d), new THREE.MeshBasicMaterial({ color }));
-  m.position.set(x, MAP.ceilH - 0.02, z); mapGroup.add(m); return m;
+  m.position.set(x, MAP.ceilH - 0.02, z); mapGroup.add(m); trackObj(m); return m;
 }
 /** Axis-aligned wall segment from (x0,z0) to (x1,z1). */
 function wallSeg(x0, z0, x1, z1, matFn, o = {}) {
@@ -774,7 +789,7 @@ function disposeObj(o) {
     if (c.material) { const ms = Array.isArray(c.material) ? c.material : [c.material]; for (const m of ms) { if (m.map) m.map.dispose(); m.dispose(); } }
   });
 }
-function loadMap(id) {
+function loadMap(id, edits) {
   const def = MAPS[id] || MAPS.mansion;
   for (const c of [...mapGroup.children]) { mapGroup.remove(c); disposeObj(c); }
   env.length = 0; colliders.length = 0; tops.length = 0; unders.length = 0; _envBoxes.clear(); navCols = []; lampCount = 0;
@@ -793,7 +808,13 @@ function loadMap(id) {
   sun.shadow.camera.updateProjectionMatrix();
   scene.background = new THREE.Color(L.bg ?? 0x151a26);
   scene.fog = L.fog ? new THREE.Fog(L.fog[0], L.fog[1], L.fog[2]) : null;
-  const extra = def.build() || []; if (typeof contactShadows === 'function') contactShadows();
+  _mapTrack = true; _lastMapObj = null;
+  let extra;
+  try { extra = def.build() || []; } finally { _mapTrack = false; _lastMapObj = null; }
+  if (edits === undefined && typeof MapEdits !== 'undefined') edits = MapEdits.get(def.id);
+  MAP.editsKey = editsKey(edits);
+  MAP.editReport = applyMapEdits(edits);
+  if (typeof contactShadows === 'function') contactShadows();
   if (def.gate) {
     const g = def.gate, w = g.w || 1.8, h = g.h || 2.3;
     gateMesh = new THREE.Mesh(new THREE.BoxGeometry(g.a === 'h' ? w : 0.16, h, g.a === 'h' ? 0.16 : w), tm('hazard', 3, 4, 0.7));

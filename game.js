@@ -563,7 +563,8 @@ const G = {
     UI.loading(true, 'Loading ' + (MAPS[cfg.map]?.name || 'map') + '…');
     await nextFrame();
     clearHub(); disposeMenuDoll();
-    if (!MAP || MAP.id !== cfg.map) loadMap(cfg.map);
+    const edits = MapEdits.get(cfg.map) || null;
+    if (!MAP || MAP.id !== cfg.map || MAP.editsKey !== editsKey(edits)) loadMap(cfg.map, edits);
     await nextFrame();
     const D = DIFF[cfg.diff] || DIFF.normal;
     const aiHiders = [], taken = [{ x: MAP.playerSpawn[0], z: MAP.playerSpawn[1] }];
@@ -583,14 +584,16 @@ const G = {
     }
     const aiHunters = [];
     for (let i = 0; i < cfg.aiHunters; i++) aiHunters.push({ id: 'aiH' + i + uid(), name: `Hunter ${i + 1}`, avatar: randomHunterAvatar(i + Math.floor(Math.random() * 6)) });
-    return { map: cfg.map, mode: cfg.mode || 'classic', cfg, players, aiHiders, aiHunters };
+    return { map: cfg.map, mode: cfg.mode || 'classic', cfg, players, aiHiders, aiHunters, edits };
   },
   async setupRound(P) {
     this.phase = 'loading'; UI.hubHud(false); UI.wheel(false);
     UI.loading(true, 'Loading ' + (MAPS[P.map]?.name || 'map') + '…');
     await nextFrame();
     this.clearRound(); disposeMenuDoll();
-    if (!MAP || MAP.id !== P.map) loadMap(P.map);
+    // Build exactly the host's map: its editor changes ride along with the round (older hosts send none).
+    const edits = 'edits' in P ? P.edits : MapEdits.shipped(P.map);
+    if (!MAP || MAP.id !== P.map || MAP.editsKey !== editsKey(edits)) loadMap(P.map, edits);
     this.P = P; this.D = DIFF[P.cfg.diff] || DIFF.normal;
     for (const a of P.aiHiders) {
       const c = new Cham({ id: a.id, name: a.name, shape: a.shape, eyes: a.eyes, color: a.color });
@@ -922,6 +925,7 @@ const G = {
   },
   lock() { if (this.paint || this.phase === 'handoff' || UI.wheelOpen || UI.panelOpen) return; try { const p = renderer.domElement.requestPointerLock?.(); p?.catch?.(() => { }); } catch (e) { /* needs a user gesture */ } },
   toMenu() {
+    if (this.fromEditor && !this.online) { MapEditor.resume(); return; }
     if (this.online) { Net.close(); this.online = false; if (window.mcNative) mcNative.hostStop(); }
     this.clearRound(); this.phase = 'menu'; this.party = null;
     UI.hud(false); UI.hubHud(false); UI.screen('menu'); showMenuScene();
@@ -1049,7 +1053,7 @@ function clearHub() {
 }
 function enterHub() {
   G.clearRound(); disposeMenuDoll();
-  if (!MAP || MAP.id !== 'lobby') loadMap('lobby');
+  if (!MAP || MAP.id !== 'lobby' || MAP.editsKey !== editsKey(MapEdits.get('lobby'))) loadMap('lobby');
   const H = MAPS.lobby.hub;
   const me = new Cham({ id: G.online ? Net.id : 'me', name: PROFILE.name, local: true, human: true, color: PROFILE.tag, shape: PROFILE.cham.shape, eyes: PROFILE.cham.eyes });
   me.root.position.set(MAP.playerSpawn[0] + rand(-1.5, 1.5), 0, MAP.playerSpawn[1] + rand(-1, 1)); me.setYaw(Math.PI);
@@ -1188,7 +1192,7 @@ let menuDoll = null, menuT = 0, menuPoseT = 0, menuPoseI = 0;
 const MENU_CYCLE = ['stand', 'wave', 'star', 'thinker', 'dance', 'crouch', 'reach', 'cheer', 'kneel'];
 function disposeMenuDoll() { if (menuDoll) { menuDoll.dispose(); menuDoll = null; } }
 function showMenuScene() {
-  if (!MAP || MAP.id !== 'lobby') loadMap('lobby');
+  if (!MAP || MAP.id !== 'lobby' || MAP.editsKey !== editsKey(MapEdits.get('lobby'))) loadMap('lobby');
   disposeMenuDoll();
   menuDoll = new Cham({ name: PROFILE.name, shape: PROFILE.cham.shape, eyes: PROFILE.cham.eyes, color: PROFILE.tag });
   menuDoll.root.position.set(13.6, 0, 11.2); menuDoll.setYaw(0.35); menuDoll.setPose('stand', true);
@@ -1704,6 +1708,7 @@ function update(dt) {
   G.t += dt;
   updateFx(dt);
   if (MAP && MAP.tick) MAP.tick(dt);
+  if (G.phase === 'editor') { MapEditor.update(dt); return; }
   if (G.phase === 'menu' || G.phase === 'boot') { updateMenuScene(dt); return; }
   if (G.phase === 'hub') { updateHub(dt); hudT -= dt; if (hudT <= 0) { hudT = 0.1; UI.hubTick(); } return; }
   if (G.phase === 'end') { if (G.reveal) G.updateReveal(dt); else updateCamera(dt); G.netTick(dt); return; }

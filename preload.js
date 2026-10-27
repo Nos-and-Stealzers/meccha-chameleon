@@ -9,6 +9,12 @@ contextBridge.exposeInMainWorld('mcNative', {
   quit: () => ipcRenderer.invoke('app:quit'),
   fullscreen: () => ipcRenderer.invoke('app:fullscreen'),
   openManager: () => ipcRenderer.invoke('app:openManager'),
+  flags: () => ipcRenderer.invoke('app:flags'),
+  onOpenEditor: (cb) => ipcRenderer.on('app:openEditor', () => cb()),
+  editsInfo: () => ipcRenderer.invoke('edits:info'),
+  editsSave: (all) => ipcRenderer.invoke('edits:save', all),
+  editsExport: (name, text) => ipcRenderer.invoke('edits:export', name, text),
+  editsImport: () => ipcRenderer.invoke('edits:import'),
 });
 
 contextBridge.exposeInMainWorld('mcServers', {
