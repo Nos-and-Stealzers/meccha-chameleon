@@ -1,6 +1,6 @@
 {
   "name": "peperhide",
-  "version": "4.2.0",
+  "version": "4.3.0",
   "description": "peperhide: paint-yourself hide and seek",
   "main": "main.js",
   "scripts": {

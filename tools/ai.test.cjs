@@ -6,7 +6,7 @@ function harness(overrides = {}) {
   const G = { t: 10, D: { huntSpeed: 2.7, hiderSkill: 'pro' }, phase: 'hunt', hunters: [], hiders: [], hostTag() { this.tags = (this.tags || 0) + 1; } };
   const c = { THREE, V3, Math, Map, Set, G, STEP: .3, colliders: [],
     rand: (a,b) => (a+b)/2, clamp: (x,a,b) => Math.min(b,Math.max(a,x)), lerp: (a,b,t) => a+(b-a)*t, angDiff: (a,b) => b-a,
-    envHit: () => null, segClear: () => true, route: (x,z,tx,tz) => [{x:tx,z:tz}],
+    envHit: () => null, segClear: () => true, freeAt: () => true, route: (x,z,tx,tz) => [{x:tx,z:tz}],
     collideBody() {}, overlapsXZ: () => false, Sound: { alert() {} }, searchAround: () => [],
     stepNoise() {}, autoCamo() {}, POSES: {}, ...overrides };
   vm.createContext(c);
@@ -152,4 +152,14 @@ test('chase uses the sampled last-seen position immediately after losing sight',
   h.update(.05,[t]);
   assert.equal(h.path[0].x,5); assert.equal(h.path[0].z,0);
   assert.equal(h.facing.x,5); assert.equal(G.tags||0,0);
+});
+test('chasing a hider on an unstandable top walks to a free spot within tag reach instead of freezing', () => {
+  const blocked = (x, z) => Math.abs(x - 5) < 0.5 && Math.abs(z) < 0.5;
+  const { h } = harness({ freeAt: (x, z) => !blocked(x, z), route: (x, z, tx, tz) => blocked(tx, tz) ? [] : [{ x: tx, z: tz }] });
+  h.goNear(5, 0);
+  assert.equal(h.path.length, 1);
+  const p = h.path[0];
+  assert.ok(!blocked(p.x, p.z), 'approach point must be standable');
+  assert.ok(Math.hypot(p.x - 5, p.z) <= 1.15, 'approach point must stay within tag reach');
+  assert.ok(p.x < 5, 'approach from the hunter side');
 });
