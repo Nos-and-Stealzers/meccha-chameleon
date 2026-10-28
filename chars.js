@@ -408,11 +408,60 @@ class Cham {
     rig.group.position.y = this.curBaseY + Math.abs(Math.sin(this.walkT)) * (this.sprinting ? 0.05 : 0.035) * this.walkAmt + bounce;
   }
   rebake() { this.rig.bake(); }
-  paintDot(uv, rgb, r) {
+  paintDot(uv, rgb, r, hit = null) {
+    if (hit) return this.paintSurface(hit, rgb, r);
     const g = this.ctx, x = uv.x * TS, y = (1 - uv.y) * TS;
     g.fillStyle = Array.isArray(rgb) ? `rgb(${clamp(rgb[0], 0, 255) | 0},${clamp(rgb[1], 0, 255) | 0},${clamp(rgb[2], 0, 255) | 0})` : rgb;
     g.beginPath(); g.arc(x, y, Math.max(0.8, r * PSCALE), 0, 7); g.fill();
     this.painted = true; this.dirty = true;
+  }
+  // Rasterise the world-space footprint into each intersecting UV triangle.
+  // An atlas-space circle paints unrelated limbs and skips skin across UV seams.
+  paintSurface(hit, rgb, r) {
+    const mesh = hit.object || this.mesh, geo = mesh.geometry, pos = geo.attributes.position, uv = geo.attributes.uv, ix = geo.index;
+    mesh.updateWorldMatrix(true, false);
+    const world = this._brushWorld?.length === pos.count * 3 ? this._brushWorld : (this._brushWorld = new Float32Array(pos.count * 3));
+    const v = new V3();
+    for (let i = 0; i < pos.count; i++) { v.fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld); v.toArray(world, i * 3); }
+    const normal = hit.face.normal.clone().applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(mesh.matrixWorld));
+    const radius = Math.max(0.002, r / 118), rr = radius * radius, p = hit.point;
+    const tris = []; let minX = TS, minY = TS, maxX = -1, maxY = -1;
+    for (let t = 0, count = ix ? ix.count : pos.count; t < count; t += 3) {
+      const a = ix ? ix.getX(t) : t, b = ix ? ix.getX(t + 1) : t + 1, c = ix ? ix.getX(t + 2) : t + 2;
+      const ax = world[a * 3], ay = world[a * 3 + 1], az = world[a * 3 + 2];
+      const bx = world[b * 3], by = world[b * 3 + 1], bz = world[b * 3 + 2];
+      const cx = world[c * 3], cy = world[c * 3 + 1], cz = world[c * 3 + 2];
+      const dx = p.x - clamp(p.x, Math.min(ax, bx, cx), Math.max(ax, bx, cx));
+      const dy = p.y - clamp(p.y, Math.min(ay, by, cy), Math.max(ay, by, cy));
+      const dz = p.z - clamp(p.z, Math.min(az, bz, cz), Math.max(az, bz, cz));
+      if (dx * dx + dy * dy + dz * dz > rr) continue;
+      const abx = bx - ax, aby = by - ay, abz = bz - az, acx = cx - ax, acy = cy - ay, acz = cz - az;
+      if ((aby * acz - abz * acy) * normal.x + (abz * acx - abx * acz) * normal.y + (abx * acy - aby * acx) * normal.z <= 0) continue;
+      const x0 = uv.getX(a) * TS, y0 = (1 - uv.getY(a)) * TS;
+      const x1 = uv.getX(b) * TS, y1 = (1 - uv.getY(b)) * TS, x2 = uv.getX(c) * TS, y2 = (1 - uv.getY(c)) * TS;
+      const det = (x1 - x0) * (y2 - y0) - (y1 - y0) * (x2 - x0); if (Math.abs(det) < 1e-8) continue;
+      const l = clamp(Math.floor(Math.min(x0, x1, x2)), 0, TS - 1), top = clamp(Math.floor(Math.min(y0, y1, y2)), 0, TS - 1);
+      const right = clamp(Math.ceil(Math.max(x0, x1, x2)), 0, TS - 1), bottom = clamp(Math.ceil(Math.max(y0, y1, y2)), 0, TS - 1);
+      tris.push({ ax, ay, az, abx, aby, abz, acx, acy, acz, x0, y0, x1, y1, x2, y2, det, l, top, right, bottom });
+      minX = Math.min(minX, l); minY = Math.min(minY, top); maxX = Math.max(maxX, right); maxY = Math.max(maxY, bottom);
+    }
+    if (!tris.length) return;
+    const img = this.ctx.getImageData(minX, minY, maxX - minX + 1, maxY - minY + 1), data = img.data;
+    const col = Array.isArray(rgb) ? rgb : (() => { const c = new THREE.Color(rgb); return [c.r * 255, c.g * 255, c.b * 255]; })();
+    let changed = false;
+    for (const t of tris) {
+      for (let y = t.top; y <= t.bottom; y++) for (let x = t.l; x <= t.right; x++) {
+        const px = x + 0.5 - t.x0, py = y + 0.5 - t.y0;
+        const b = (px * (t.y2 - t.y0) - py * (t.x2 - t.x0)) / t.det;
+        const c = ((t.x1 - t.x0) * py - (t.y1 - t.y0) * px) / t.det;
+        if (b < -1e-6 || c < -1e-6 || b + c > 1.000001) continue;
+        const dx = t.ax + b * t.abx + c * t.acx - p.x, dy = t.ay + b * t.aby + c * t.acy - p.y, dz = t.az + b * t.abz + c * t.acz - p.z;
+        if (dx * dx + dy * dy + dz * dz > rr) continue;
+        const k = ((y - minY) * img.width + x - minX) * 4;
+        data[k] = col[0]; data[k + 1] = col[1]; data[k + 2] = col[2]; data[k + 3] = 255; changed = true;
+      }
+    }
+    if (changed) { this.ctx.putImageData(img, minX, minY); this.painted = true; this.dirty = true; }
   }
   fill(rgb) { this.ctx.fillStyle = rgb; this.ctx.fillRect(0, 0, TS, TS); this.painted = true; this.dirty = true; }
   flush() { if (this.dirty) { this.tex.needsUpdate = true; this.dirty = false; this.texVer++; } }

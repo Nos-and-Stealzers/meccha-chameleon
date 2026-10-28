@@ -229,6 +229,9 @@ const UI = {
 
   /* ---------- in-round HUD ---------- */
   paintPanel(on) {
+    // The round HUD is hidden in the practice hub; keep the same controls in
+    // whichever HUD is actually visible rather than hiding the entire toolbox.
+    if (on) (G.phase === 'hub' ? $('#hubHud') : $('#hud')).appendChild($('#paintPanel'));
     $('#paintPanel').classList.toggle('hidden', !on);
     document.body.classList.toggle('painting', !!on);
     if (on && G.my) {

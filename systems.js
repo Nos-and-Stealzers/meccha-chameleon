@@ -63,7 +63,7 @@ const Stick = {
     P.root.updateMatrixWorld(true);
     const pos = P.rig.pickGeo.attributes.position, m = P.mesh.matrixWorld;
     let minD = 1e9, minY = 1e9, topY = -1e9;
-    for (let i = 0; i < pos.count; i += 3) {
+    for (let i = 0; i < pos.count; i++) {
       _sv1.fromBufferAttribute(pos, i).applyMatrix4(m);
       const d = _sv2.copy(_sv1).sub(st.point).dot(st.n);
       if (d < minD) minD = d; if (_sv1.y < minY) minY = _sv1.y; if (_sv1.y > topY) topY = _sv1.y;
@@ -76,6 +76,7 @@ const Stick = {
       const ceil = Math.min(MAP.ceilH ?? 99, st.ceilY ?? 99);
       const high = topY + st.n.y * (0.012 - minD);
       if (high > ceil - 0.01) P.root.position.y -= high - (ceil - 0.01);
+      st.bottom = Math.max(low, floor + 0.004);
       st.top = Math.min(high, ceil - 0.01);
     }
     P.body.vy = 0;
@@ -153,7 +154,7 @@ const Stick = {
           const c = this.probe(P, null, true);
           if (c && c.point.y - (st.top ?? 0) < 0.12) { this.attach(P, c); toast('On the ceiling · WASD crawl · Shift drop'); return; }
         }
-        if (vy < 0 && P.root.position.y <= (MAP.floorY || 0) + 0.006 && Math.abs(P.root.position.y - before) < 1e-4) { this.release(P, false); return; }
+        if (vy < 0 && st.bottom <= (MAP.floorY || 0) + 0.006 && Math.abs(P.root.position.y - before) < 1e-4) { this.release(P, false); return; }
       }
       if (side) {
         const camR = new V3(Math.cos(G.ctrl.yaw), 0, -Math.sin(G.ctrl.yaw));
@@ -177,6 +178,7 @@ const Stick = {
         } else { P.root.position.copy(old); st.n.copy(oldN); st.point.copy(oldPt); }
       }
     } else {
+      if (crouchHeld()) { this.release(P, false); return; }
       let mx = 0, mz = 0; if (keys.KeyW) mz -= 1; if (keys.KeyS) mz += 1; mx = side;
       if (mx || mz) {
         const y = G.ctrl.yaw, fx = -Math.sin(y), fz = -Math.cos(y), rx = Math.cos(y), rz = -Math.sin(y);
@@ -187,7 +189,7 @@ const Stick = {
         const c = this.probe(P, null, true);
         if (!c) P.root.position.copy(old); else { st.point.copy(c.point); this.flush(P); }
       }
-      if (crouchHeld()) { this.release(P, false); }
+
     }
   },
 };

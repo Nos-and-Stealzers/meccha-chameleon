@@ -691,7 +691,7 @@ function collideBody(body, dt, gravity = true) {
     if (c.max.y <= p.y + STEP || c.min.y >= p.y + body.h) continue;
     pushOut(p, body.r, c);
   }
-  p.x = clamp(p.x, B.x0 + 0.15, B.x1 - 0.15); p.z = clamp(p.z, B.z0 + 0.15, B.z1 - 0.15);
+  p.x = clamp(p.x, B.x0 + body.r, B.x1 - body.r); p.z = clamp(p.z, B.z0 + body.r, B.z1 - body.r);
   if (!gravity) return;
   body.vy -= 20 * dt;
   let ny = p.y + body.vy * dt;
@@ -705,6 +705,15 @@ function collideBody(body, dt, gravity = true) {
     if (ny + body.h > MAP.ceilH) { ny = MAP.ceilH - body.h; body.vy = 0; }
   }
   p.y = ny;
+}
+/* Resolve the path, not just its endpoint: thin edited walls and closed gates
+   must stop fast players too. Small radius-sized steps preserve wall sliding. */
+function moveBody(body, dx, dz) {
+  const steps = Math.max(1, Math.ceil(Math.hypot(dx, dz) / Math.max(0.02, body.r * 0.5)));
+  for (let i = 0; i < steps; i++) {
+    body.pos.x += dx / steps; body.pos.z += dz / steps;
+    collideBody(body, 0, false);
+  }
 }
 function freeAt(x, z, r, h, y0 = 0) {
   const B = MAP.bounds;
@@ -729,7 +738,7 @@ function buildNav(extraPts = []) {
   NODES = [];
   const add = (x, z) => { if (freeAt(x, z, 0.28, 1.6) || NODES.length < 0) NODES.push({ x, z, edges: [] }); };
   for (const zn of ZONES) for (const [x, z] of zn.pts) add(x, z);
-  for (const [x, z] of extraPts) NODES.push({ x, z, edges: [] });
+  for (const [x, z] of extraPts) add(x, z);
   for (let i = 0; i < NODES.length; i++) for (let j = i + 1; j < NODES.length; j++) {
     const a = NODES[i], b = NODES[j];
     if (Math.hypot(a.x - b.x, a.z - b.z) > 16) continue;
@@ -738,7 +747,7 @@ function buildNav(extraPts = []) {
   for (const a of NODES) if (!a.edges.length) {
     let best = null, bd = 1e9;
     for (const b of NODES) { if (b === a) continue; const d = Math.hypot(a.x - b.x, a.z - b.z); if (d < bd) { bd = d; best = b; } }
-    if (best) { a.edges.push(best); best.edges.push(a); }
+    if (best && segClear(a.x, a.z, best.x, best.z)) { a.edges.push(best); best.edges.push(a); }
   }
 }
 function nearestNode(x, z) {
@@ -754,7 +763,7 @@ function nearestNode(x, z) {
 function route(fx, fz, tx, tz) {
   if (segClear(fx, fz, tx, tz, 0.2, 0.7)) return [{ x: tx, z: tz }];
   const s = nearestNode(fx, fz), g = nearestNode(tx, tz);
-  if (!s || !g) return [{ x: tx, z: tz }];
+  if (!s || !g) return [];
   const dist = new Map([[s, 0]]), prev = new Map(), open = [s], done = new Set();
   while (open.length) {
     open.sort((a, b) => dist.get(a) - dist.get(b));
@@ -765,6 +774,7 @@ function route(fx, fz, tx, tz) {
       if (nd < (dist.get(v) ?? 1e9)) { dist.set(v, nd); prev.set(v, u); open.push(v); }
     }
   }
+  if (!done.has(g)) return [];
   const path = []; let c = g;
   while (c) { path.unshift({ x: c.x, z: c.z }); c = prev.get(c); }
   path.push({ x: tx, z: tz });

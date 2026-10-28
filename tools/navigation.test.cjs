@@ -1,0 +1,6 @@
+const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
+const source=fs.readFileSync(path.join(__dirname,'../core.js'),'utf8');
+function fn(name){const start=source.indexOf('function '+name+'(');let pos=source.indexOf('{',start),depth=1;for(let i=pos+1;i<source.length;i++){if(source[i]==='{')depth++;if(source[i]==='}'&&!--depth)return source.slice(start,i+1);}}
+test('navigation never fabricates edges through disconnected walls',()=>{const c=vm.createContext({colliders:[],gateBox:null,STEP:.34,NODES:[],ZONES:[{pts:[[0,0],[2,0]]}],freeAt:()=>true,segClear:()=>false,Math});vm.runInContext(fn('buildNav')+';buildNav()',c);assert.equal(c.NODES.reduce((n,p)=>n+p.edges.length,0),0);});
+test('navigation rejects extra markers inside solid geometry',()=>{const c=vm.createContext({colliders:[],gateBox:null,STEP:.34,NODES:[],ZONES:[],freeAt:()=>false,segClear:()=>true,Math});vm.runInContext(fn('buildNav')+';buildNav([[1,1]])',c);assert.equal(c.NODES.length,0);});
+test('a disconnected route returns no path rather than a straight line through a wall',()=>{const a={x:0,z:0,edges:[]},b={x:2,z:0,edges:[]};const c=vm.createContext({segClear:()=>false,nearestNode:x=>x===0?a:b,Math});vm.runInContext(fn('route')+';this.result=route(0,0,2,0)',c);assert.equal(c.result.length,0);});

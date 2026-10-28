@@ -304,7 +304,7 @@ class Hunter {
   constructor({ id, name, avatar, ai = false, local = false, x = 0, z = 0, y = 0 }) {
     this.id = id; this.name = name; this.avatar = avatar; this.ai = ai; this.local = local; this.color = avatar.color;
     this.pos = new V3(x, y, z); this.yaw = 0; this.look = 0; this.pitch = -0.15;
-    this.state = 'wait'; this.path = []; this.sus = new Map(); this.focus = null;
+    this.state = 'wait'; this.path = []; this.sus = new Map(); this.observed = new Map(); this.focus = null;
     this.lookT = 0.12 + Math.random() * 0.2; this.scanT = 0; this.stuckT = 0; this.repathT = 0; this.swing = 0; this.confused = 0; this.t = Math.random() * 10; this.markT = 0; this.pingCD = rand(12, 25);
     this.body = { pos: this.pos, r: 0.3, h: 1.8, vy: 0 };
     this.visited = {}; this.target = null; this.spd = 0; this.animLast = this.pos.clone();
@@ -318,6 +318,13 @@ class Hunter {
   sync() { this.group.position.copy(this.pos); this.group.rotation.y = this.yaw; }
   dispose() { scene.remove(this.group); this.model.mat.dispose(); this.model.rig.dispose(); }
   eye() { return new V3(this.pos.x, this.pos.y + 1.55, this.pos.z); }
+  /** Occlusion veto, not detection: render-diff vision still decides who is noticeable. */
+  clearSight(t) {
+    const from = this.eye(), delta = t.center().sub(from), d = delta.length();
+    if (d < 0.001) return true;
+    const hit = envHit(from, delta.divideScalar(d), d);
+    return !hit || hit.distance >= d - 0.03;
+  }
   doSwing() { this.swing = 0.35; }
   animTool(dt) {
     if (this.swing > 0) this.swing -= dt;
@@ -336,26 +343,42 @@ class Hunter {
     if (this.ai) { this.mark.visible = this.state === 'investigate' || this.markT > 0; this.markBang.visible = this.state === 'chase'; }
     this.sync();
   }
-  goTo(x, z) { this.path = route(this.pos.x, this.pos.z, x, z); }
+  goTo(x, z) {
+    const path = route(this.pos.x, this.pos.z, x, z);
+    let p = this.pos;
+    for (let i = 0; i < path.length; i++) {
+      const n = path[i];
+      // The shared graph may contain editor-created/disconnected fallback edges.
+      if (!segClear(p.x, p.z, n.x, n.z, this.body?.r || 0.3, i === path.length - 1 ? 0.35 : 0)) { this.path = []; return; }
+      p = n;
+    }
+    this.path = path;
+  }
   /** Team search: score rooms by how long since ANY hunter cleared them, skip rooms a teammate is heading to,
       prefer nearby rooms, then walk to a spot that overlooks hiding places (under tables, shelves, walls). */
   pickGoal() {
     const tm = teamMem(), zones = ZONES.filter((z) => !z.hunters);
-    let best = null, bs = -1e9;
+    const ranked = [];
     for (const z of zones) {
       const since = G.t - (tm.seen[z.id] ?? -60), cx = (z.x0 + z.x1) / 2, cz = (z.z0 + z.z1) / 2;
       const dist = Math.hypot(cx - this.pos.x, cz - this.pos.z);
       const claimed = Object.entries(tm.claim).some(([hid, zid]) => hid !== this.id && zid === z.id);
       const area = (z.x1 - z.x0) * (z.z1 - z.z0);
       const s = Math.min(since, 70) - dist * 0.9 - (claimed ? 40 : 0) + Math.min(area, 120) * 0.05 + rand(0, 14);
-      if (s > bs) { bs = s; best = z; }
+      ranked.push({ zn: z, score: s });
     }
-    const zn = best || pick(zones);
-    tm.claim[this.id] = zn.id; tm.seen[zn.id] = G.t; this.visited[zn.id] = G.t;
-    this.checks = hidingChecks(zn);
-    const p = this.checks.length ? overlookPoint(this.checks[0], zn) : pick(zn.pts);
-    this.goTo(p[0] + rand(-0.3, 0.3), p[1] + rand(-0.3, 0.3));
-    this.state = 'patrol';
+    ranked.sort((a, b) => b.score - a.score);
+    for (const { zn } of ranked) {
+      const checks = hidingChecks(zn), preferred = checks.length ? overlookPoint(checks[0], zn) : zn.pts[0];
+      for (const p of [preferred, ...zn.pts]) {
+        if (!p || Math.hypot(p[0] - this.pos.x, p[1] - this.pos.z) < 0.5) continue;
+        this.goTo(p[0], p[1]);
+        if (!this.path.length) continue;
+        tm.claim[this.id] = zn.id; tm.seen[zn.id] = G.t; this.visited[zn.id] = G.t;
+        this.checks = checks; this.state = 'patrol'; return;
+      }
+    }
+    delete tm.claim[this.id]; this.path = []; this.checks = []; this.state = 'scan'; this.scanT = 2;
   }
   callout(p) {
     for (const h of G.hunters) if (h !== this && h.ai && h.state !== 'chase' && h.pos.distanceTo(this.pos) < 16) h.hear(p, 1);
@@ -387,13 +410,22 @@ class Hunter {
     if (this.lookT <= 0) { const dtLook = 0.25 - this.lookT; this.lookT = 0.25; this.perceive(targets, dtLook); }
     for (const t of targets) {
       const tp = t.root.position;
-      if (Math.hypot(tp.x - this.pos.x, tp.z - this.pos.z) < 0.5 + t.body.r && Math.abs(tp.y - this.pos.y) < 1.5) this.sus.set(t, Math.max(this.sus.get(t) || 0, 1.15));
+      if (Math.hypot(tp.x - this.pos.x, tp.z - this.pos.z) < 0.5 + t.body.r && Math.abs(tp.y - this.pos.y) < 1.5 && this.clearSight(t)) {
+        this.sus.set(t, Math.max(this.sus.get(t) || 0, 1.15));
+        this.observed.set(t, { pos: tp.clone(), time: G.t });
+      }
     }
+    const previousFocus = this.focus;
     let best = null, bs = 0;
-    for (const t of targets) { const s = this.sus.get(t) || 0; if (s > bs) { bs = s; best = t; } }
-    if (best && bs >= 1) { if (this.state !== 'chase') { this.state = 'chase'; this.focus = best; this.repathT = 0; this.lastSeen = best.root.position.clone(); this.seenT = G.t; Sound.alert(this.eye()); this.callout(best.root.position); } }
-    else if (best && bs >= 0.35 && this.state !== 'chase' && this.state !== 'search') { if (this.state !== 'investigate') { this.lastSeen = best.root.position.clone(); this.seenT = G.t; if (bs > 0.6) this.callout(best.root.position); } this.state = 'investigate'; this.focus = best; }
-    if (this.focus && this.lastVis && this.lastVis.has(this.focus)) { this.lastSeen = this.focus.root.position.clone(); this.seenT = G.t; }
+    for (const t of targets) {
+      const s = this.sus.get(t) || 0, observation = this.observed.get(t);
+      if (t === this.blockedTarget && G.t < this.blockedUntil) continue;
+      if (observation && G.t - observation.time <= 0.3 && this.clearSight(t) && s > bs) { bs = s; best = t; }
+    }
+    if (best && bs >= 1) { if (this.state !== 'chase') { this.state = 'chase'; this.focus = best; this.repathT = 0; Sound.alert(this.eye()); this.callout(this.observed.get(best).pos); } }
+    else if (best && bs >= 0.35 && this.state !== 'chase' && this.state !== 'search') { if (this.state !== 'investigate' && bs > 0.6) this.callout(this.observed.get(best).pos); this.state = 'investigate'; this.focus = best; }
+    const observation = this.focus && this.observed.get(this.focus);
+    if (observation && (this.focus !== previousFocus || observation.time > (this.seenT ?? -Infinity))) { this.lastSeen = observation.pos.clone(); this.seenT = observation.time; }
     this.shootCD = (this.shootCD ?? 3) - dt; this.ammoT = (this.ammoT || 0) + dt; if (this.ammoT > 9) { this.ammoT = 0; this.ammo = Math.min(3, (this.ammo ?? 3) + 1); }
     if ((this.state === 'chase' || this.state === 'investigate') && (!this.focus || this.focus.caught || !targets.includes(this.focus))) { this.focus = null; this.pickGoal(); }
     this.mark.visible = this.state === 'investigate' || this.markT > 0; this.markBang.visible = this.state === 'chase';
@@ -401,20 +433,21 @@ class Hunter {
     if (this.state === 'chase') {
       const lost = G.t - (this.seenT ?? G.t);
       if (lost > 3.5) { this.state = 'search'; this.scanT = 4; this.checks = this.lastSeen ? searchAround(this.lastSeen) : []; this.focus = null; if (this.lastSeen) this.goTo(this.lastSeen.x, this.lastSeen.z); this.sync(); return; }
-      const tp = lost < 0.6 ? this.focus.root.position : this.lastSeen;
+      const tp = this.lastSeen;
       this.repathT -= dt;
       if (this.repathT <= 0) { this.goTo(tp.x, tp.z); this.repathT = 0.6; }
       this.follow(dt, D.huntSpeed * 1.35 * (G.overtime ? 1.2 : 1));
       const fpz = this.focus.root.position, d = Math.hypot(fpz.x - this.pos.x, fpz.z - this.pos.z);
-      this.faceTo(lost < 0.6 ? this.focus.center() : this.lastSeen.clone().setY(this.lastSeen.y + 0.3), dt);
-      if (d < 1.35 && lost < 1.2 && Math.abs(fpz.y - this.pos.y) < 2.2 && this.swing <= 0) { this.doSwing(); G.hostTag(this.focus.id, this.id); this.sus.delete(this.focus); this.focus = null; this.state = 'scan'; this.scanT = 1.5; this.checks = []; }
+      this.faceTo(this.lastSeen.clone().setY(this.lastSeen.y + 0.3), dt);
+      if (d < 1.35 && lost < 0.3 && Math.abs(fpz.y - this.pos.y) < 2.2 && this.swing <= 0 && this.clearSight(this.focus)) { this.doSwing(); G.hostTag(this.focus.id, this.id); this.sus.delete(this.focus); this.focus = null; this.state = 'scan'; this.scanT = 1.5; this.checks = []; }
       else if (lost > 0.6 && Math.hypot(tp.x - this.pos.x, tp.z - this.pos.z) < 0.7) { this.state = 'search'; this.scanT = 4; this.checks = searchAround(this.lastSeen); this.focus = null; this.path = []; }
     } else if (this.state === 'investigate') {
-      const c = this.focus.center(), tp = this.lastSeen || this.focus.root.position, d = Math.hypot(tp.x - this.pos.x, tp.z - this.pos.z);
+      const tp = this.lastSeen, c = tp.clone().setY(tp.y + 0.3), d = Math.hypot(tp.x - this.pos.x, tp.z - this.pos.z);
       if (d > 2.4) { this.repathT -= dt; if (this.repathT <= 0) { this.goTo(tp.x, tp.z); this.repathT = 1; } this.follow(dt, D.huntSpeed * 0.55, 2.4); }
       this.faceTo(c, dt);
       const sv = this.sus.get(this.focus) || 0;
-      if (sv > 0.5 && d < 9 && d > 1.6 && this.shootCD <= 0 && (this.ammo ?? 3) > 0 && G.phase === 'hunt' && G.t - (this.seenT ?? 0) < 0.6) { this.shootCD = rand(3.5, 6); this.ammo = (this.ammo ?? 3) - 1; aiShoot(this, c); }
+      if (sv > 0.5 && d < 9 && d > 1.6 && this.shootCD <= 0 && (this.ammo ?? 3) > 0 && G.phase === 'hunt' && G.t - (this.seenT ?? 0) < 0.3 && this.clearSight(this.focus)) { this.shootCD = rand(3.5, 6); this.ammo = (this.ammo ?? 3) - 1; aiShoot(this, c); }
+      if (G.t - this.seenT > 3.5) { this.state = 'search'; this.scanT = 4; this.checks = searchAround(this.lastSeen); this.focus = null; this.path = []; }
       if (sv < 0.15) { this.focus = null; this.pickGoal(); }
     } else if (this.state === 'search') {
       if (this.path.length) this.follow(dt, G.D.huntSpeed * 0.9);
@@ -430,10 +463,14 @@ class Hunter {
       if (this.pingCD <= 0 && G.phase === 'hunt') { this.pingCD = rand(26, 40); G.emit({ e: 'ping', id: this.id, x: this.pos.x, y: this.pos.y, z: this.pos.z }); }
       if (this.scanT <= 0) this.pickGoal();
     }
-    if (this.state === 'patrol' || this.state === 'chase' || (this.state === 'search' && this.path.length)) {
+    if (this.state === 'patrol' || this.state === 'chase' || (this.state === 'investigate' && this.lastSeen && this.pos.distanceTo(this.lastSeen) > 2.5) || (this.state === 'search' && this.path.length)) {
       this.stuckT = this.pos.distanceTo(this.lastP || this.pos) < 0.6 * dt ? this.stuckT + dt : 0;
       this.lastP = this.pos.clone();
-      if (this.stuckT > 1.5) { this.stuckT = 0; if (this.state === 'patrol') this.pickGoal(); else this.path.shift(); }
+      if (this.stuckT > 1.5) {
+        this.stuckT = 0;
+        if (this.state === 'patrol') this.pickGoal();
+        else { this.blockedTarget = this.focus; this.blockedUntil = G.t + 2; this.focus = null; this.state = 'search'; this.scanT = 2; this.checks = this.lastSeen ? searchAround(this.lastSeen) : []; this.path = []; }
+      }
     }
     this.sync();
   }
@@ -447,9 +484,12 @@ class Hunter {
   }
   follow(dt, speed, stopAt = 0) {
     if (!this.path.length) return;
+    // Skip reached corners BEFORE moving, and retain progress across repeated replans.
+    while (this.path.length > 1 && (Math.hypot(this.path[0].x - this.pos.x, this.path[0].z - this.pos.z) < 0.45 || segClear(this.pos.x, this.pos.z, this.path[1].x, this.path[1].z, this.body?.r || 0.3, this.path.length === 2 ? 0.35 : 0))) this.path.shift();
     const n = this.path[0], last = this.path.length === 1;
-    const d = this.moveToward(n.x, n.z, speed, dt);
-    if (d < (last ? Math.max(0.3, stopAt) : 0.45)) this.path.shift();
+    const d = Math.hypot(n.x - this.pos.x, n.z - this.pos.z), stop = last ? Math.max(0.35, stopAt) : 0;
+    if (d <= stop + 0.001) { this.path.shift(); return; }
+    this.moveToward(n.x, n.z, speed, Math.min(dt, (d - stop) / Math.max(speed, 0.001)));
   }
   faceTo(p, dt) {
     const dx = p.x - this.pos.x, dz = p.z - this.pos.z, want = Math.atan2(dx, dz);
@@ -498,8 +538,9 @@ class Hunter {
           if (d > 0.012) vis++;
           if (d > 0.06) s += d - 0.06;
         }
-        if (vis < 2) continue;
+        if (vis < 2 || !this.clearSight(t)) continue;
         seen.add(t);
+        this.observed.set(t, { pos: t.root.position.clone(), time: G.t });
         let gain = s * D.K * dt * AREA_COMP;
         if (t.buried) gain += 0.9 * dt;
         if (t.speed > 0.4) gain += D.motion * dt * Math.min(1, vis * AREA_COMP / 30);
@@ -1495,12 +1536,12 @@ renderer.domElement.addEventListener('pointerdown', (e) => {
   if (!G.paint || !G.my) return;
   if (e.button === 2) { mouse.right = true; return; }
   if (e.button !== 0) return;
-  mouse.down = true; mouse.lastUV = null;
+  mouse.down = true; mouse.lastUV = null; mouse.lastPaint = null;
   if (e.altKey || UI.curTool === 'picker') { pickColor(e); mouse.down = false; return; }
   if (UI.curTool === 'fill') { pushUndo(); G.my.fill(UI.color); G.my.flush(); Sound.splat(); mouse.down = false; return; }
   pushUndo(); paintAt(e, true);
 });
-addEventListener('pointerup', () => { mouse.down = false; mouse.right = false; mouse.lastUV = null; });
+addEventListener('pointerup', () => { mouse.down = false; mouse.right = false; mouse.lastUV = null; mouse.lastPaint = null; });
 renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
 renderer.domElement.addEventListener('wheel', (e) => {
   if (G.paint) G.paintCam.dist = clamp(G.paintCam.dist + Math.sign(e.deltaY) * 0.18, 0.8, 5);
@@ -1511,8 +1552,17 @@ renderer.domElement.addEventListener('wheel', (e) => {
 const rcPaint = new THREE.Raycaster(), ndcV = new THREE.Vector2();
 function evNdc(x, y) { ndcV.set(x / innerWidth * 2 - 1, -(y / innerHeight) * 2 + 1); return ndcV; }
 const undoStack = [];
-function pushUndo() { const P = G.my; undoStack.push({ c: P, d: P.ctx.getImageData(0, 0, TS, TS) }); if (undoStack.length > 25) undoStack.shift(); }
-function undo() { const u = undoStack.pop(); if (!u) return; u.c.ctx.putImageData(u.d, 0, 0); u.c.dirty = true; u.c.flush(); Sound.click(); }
+function pushUndo() {
+  const P = G.my; if (!P) return;
+  if (undoStack.length && undoStack[undoStack.length - 1].c !== P) undoStack.length = 0;
+  undoStack.push({ c: P, d: P.ctx.getImageData(0, 0, TS, TS), painted: P.painted });
+  if (undoStack.length > 25) undoStack.shift();
+}
+function undo() {
+  const u = undoStack.pop(); if (!u) return;
+  if (u.c !== G.my) { undoStack.length = 0; return; }
+  u.c.ctx.putImageData(u.d, 0, 0); u.c.painted = u.painted; u.c.dirty = true; u.c.flush(); Sound.click();
+}
 function pickColor(e) {
   rcPaint.setFromCamera(evNdc(e.clientX, e.clientY), camera);
   const h = rcPaint.intersectObjects(env, false)[0]; if (!h) return;
@@ -1523,29 +1573,35 @@ function pickColor(e) {
 }
 function paintAt(e, first) {
   const P = G.my; if (!P) return;
+  if (UI.curTool !== 'brush' && UI.curTool !== 'mimic') { mouse.lastPaint = null; return; }
+  // Breathing/pose blending changes the visible skin after the last pose bake.
+  P.rebake(); P.root.updateMatrixWorld(true);
   const size = UI.brush;
   if (UI.curTool === 'mimic') {
     if (G.ink <= 0) { if (first) toast('Out of mimic ink. Use the brush and eyedropper.'); return; }
     const rpx = 6 + size * 1.4;
     for (let k = 0; k < 16; k++) {
+      if (G.phase !== 'hub' && G.ink <= 0) break;
       const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * rpx;
       rcPaint.setFromCamera(evNdc(e.clientX + Math.cos(a) * r, e.clientY + Math.sin(a) * r), camera);
       const h1 = rcPaint.intersectObject(P.mesh, false)[0]; if (!h1) continue;
       const h2 = envHit(h1.point.clone().addScaledVector(rcPaint.ray.direction, 0.01), rcPaint.ray.direction, 40); if (!h2) continue;
-      P.paintDot(h1.uv, surfaceColor(h2), 2.4 + size * 0.12);
+      P.paintDot(h1.uv, surfaceColor(h2), 2.4 + size * 0.12, h1);
       if (G.phase !== 'hub') G.ink = Math.max(0, G.ink - 0.012);
     }
     P.flush(); UI.refreshInk(); return;
   }
-  rcPaint.setFromCamera(evNdc(e.clientX, e.clientY), camera);
-  const h = rcPaint.intersectObject(P.mesh, false)[0];
-  if (!h) { mouse.lastUV = null; return; }
-  const uv = h.uv.clone();
-  if (mouse.lastUV && Math.abs(mouse.lastUV.x - uv.x) < 0.06 && Math.abs(mouse.lastUV.y - uv.y) < 0.06) {
-    const steps = Math.ceil(mouse.lastUV.distanceTo(uv) * TS / Math.max(1, size * PSCALE * 0.4));
-    for (let i = 1; i <= steps; i++) P.paintDot(mouse.lastUV.clone().lerp(uv, i / steps), UI.color, size);
-  } else P.paintDot(uv, UI.color, size);
-  mouse.lastUV = uv;
+  // Interpolate in screen space: UV islands can jump even on adjacent skin.
+  // Raycast every dab so strokes never draw straight across unrelated atlas islands.
+  const prev = first ? null : mouse.lastPaint;
+  const dx = prev ? e.clientX - prev.x : 0, dy = prev ? e.clientY - prev.y : 0;
+  const steps = Math.max(1, Math.ceil(Math.hypot(dx, dy) / Math.max(1, Math.min(8, size * 0.4))));
+  for (let i = 1; i <= steps; i++) {
+    rcPaint.setFromCamera(evNdc(e.clientX - dx * (1 - i / steps), e.clientY - dy * (1 - i / steps)), camera);
+    const h = rcPaint.intersectObject(P.mesh, false)[0];
+    if (h) P.paintDot(h.uv, UI.color, size, h);
+  }
+  mouse.lastPaint = { x: e.clientX, y: e.clientY };
   P.flush();
   if (first) Sound.splat();
 }
@@ -1583,7 +1639,12 @@ function updateMyCham(dt) {
   if (G.intro && G.intro.t < 1.1) { P.animate(dt, false); collideBody(P.body, dt, true); return; }
   if (P.stick) {
     Stick.update(P, dt, free);
-    if (P.stick) { P.animate(dt, false); return; }
+    if (P.stick) {
+      P.sprinting = false; P.wasMoving = false;
+      updateStamina(dt, false);
+      P.animate(dt, false);
+      return;
+    }
   }
   if (free) {
     let mx = 0, mz = 0;
@@ -1601,7 +1662,7 @@ function updateMyCham(dt) {
       P.sprinting = sprint;
       const sp = 3.4 * (sprint ? 1.65 : 1) * (POSES[P.pose].speed || 1) * (P.size === 'petite' ? 0.85 : 1);
       stepNoise(P, dt, sprint, P.root.position);
-      P.root.position.x += vx * sp * dt; P.root.position.z += vz * sp * dt;
+      moveBody(P.body, vx * sp * dt, vz * sp * dt);
       P.setYaw(P.yaw + angDiff(P.yaw, Math.atan2(vx, vz)) * Math.min(1, dt * 12));
     }
     if (keys.Space && P.body.onGround && POSES[P.pose].move) { P.body.vy = 6.1; P.body.onGround = false; Sound.jump(); }
@@ -1640,20 +1701,21 @@ function stepNoise(who, dt, sprint, pos) {
 }
 function updateFP(dt) {
   const f = G.fp; if (!f) return;
+  const free = !G.paint && !UI.chatOpen && !UI.wheelOpen && !UI.panelOpen && !G.paused;
   let mx = 0, mz = 0;
-  if (!UI.chatOpen) { if (keys.KeyW) mz -= 1; if (keys.KeyS) mz += 1; if (keys.KeyA) mx -= 1; if (keys.KeyD) mx += 1; }
+  if (free) { if (keys.KeyW) mz -= 1; if (keys.KeyS) mz += 1; if (keys.KeyA) mx -= 1; if (keys.KeyD) mx += 1; }
   if (mx || mz) {
     const y = f.yaw, fx = -Math.sin(y), fz = -Math.cos(y), rx = Math.cos(y), rz = -Math.sin(y);
     const vx = fx * -mz + rx * mx, vz = fz * -mz + rz * mx, l = Math.hypot(vx, vz);
     const sprint = sprintHeld() && G.stam > 0.02 && !G.tired && !UI.chatOpen;
     f.sprinting = sprint;
     const sp = sprint ? 7.0 : 4.6;
-    f.pos.x += vx / l * sp * dt; f.pos.z += vz / l * sp * dt;
+    moveBody(f, vx / l * sp * dt, vz / l * sp * dt);
     if (f.onGround) { f.stepT = (f.stepT || 0) - dt * (sprint ? 1.5 : 1); if (f.stepT <= 0) { f.stepT = 0.42; Sound.step(null, sprint ? 0.07 : 0.04); } }
   } else f.sprinting = false;
   updateStamina(dt, f.sprinting && (mx || mz));
   const tf = sprintHeld() && f.sprinting && (mx || mz) ? 6 : 0; camera.fov = lerp(camera.fov, (SETTINGS.fov || 75) + tf, Math.min(1, dt * 6)); camera.updateProjectionMatrix();
-  if (keys.Space && f.onGround && !UI.chatOpen) { f.vy = 6.4; f.onGround = false; }
+  if (keys.Space && f.onGround && free) { f.vy = 6.4; f.onGround = false; }
   collideBody(f, dt, true);
   camera.position.set(f.pos.x, f.pos.y + 1.6, f.pos.z);
   camera.rotation.set(f.pitch, f.yaw, 0, 'YXZ');
@@ -1702,47 +1764,65 @@ function updateAIHiders(dt) {
     if (!c.ai || c.caught) continue;
     if (c.bolt) { stepBolt(c, dt); continue; }
     c.thinkT = (c.thinkT ?? Math.random() * 0.3) - dt; if (c.thinkT > 0) continue; c.thinkT = 0.3;
-    let sus = 0, near = 1e9, who = null;
-    for (const h of G.hunters) { const s = h.sus.get(c) || 0, d = h.pos.distanceTo(c.root.position); if (s > sus) { sus = s; who = h; } near = Math.min(near, d); }
+    let near = 1e9, who = null;
+    for (const h of G.hunters) {
+      const d = h.pos.distanceTo(c.root.position);
+      if (d > 9 || !h.clearSight(c)) continue;
+      near = Math.min(near, d);
+      const bearing = Math.atan2(c.root.position.x - h.pos.x, c.root.position.z - h.pos.z);
+      if (d < 5.5 && Math.cos(bearing - h.look) > 0.5 && (!h.ai || h.state === 'investigate' || h.state === 'chase')) who = h;
+    }
     if (c.boltTried) { if (near > 9) c.boltTried = false; continue; }
-    if (who && sus > 0.45 && sus < 1 && near < 5.5 && who.state === 'investigate') {
+    if (who) {
       c.boltTried = true;
-      if (Math.random() < (BOLT[G.D.hiderSkill] ?? 0.4)) startBolt(c);
+      if (Math.random() < (BOLT[G.D.hiderSkill] ?? 0.4)) startBolt(c, who.pos.clone());
     }
   }
 }
-function startBolt(c) {
+function startBolt(c, threat = null) {
   const p = c.root.position, keep = { x: p.x, y: p.y, z: p.z, yaw: c.yaw, pose: c.pose };
+  if (p.y > STEP) return;
+  c.setPose('stand', true); const walkR = c.body.r, walkH = c.body.h || 0.9; c.setPose(keep.pose, true);
   const taken = G.hiders.filter((o) => o !== c && !o.caught).map((o) => ({ x: o.root.position.x, z: o.root.position.z }));
   let spot = null;
   for (let i = 0; i < 10 && !spot; i++) {
     const s = findSpot(c, taken);
-    const far = G.hunters.every((h) => Math.hypot(h.pos.x - s.x, h.pos.z - s.z) > 7), dist = Math.hypot(s.x - keep.x, s.z - keep.z);
+    // Flee on foot, not to a tabletop/under-table pose that requires a teleport or crouch tunnel.
+    if (!s || (s.y || 0) > STEP || !freeAt(s.x, s.z, walkR, walkH)) continue;
+    const far = !threat || Math.hypot(threat.x - s.x, threat.z - s.z) > 7, dist = Math.hypot(s.x - keep.x, s.z - keep.z);
     if (far && dist > 4 && dist < 22) spot = s;
   }
   c.root.position.set(keep.x, keep.y, keep.z); c.setYaw(keep.yaw); c.setPose(keep.pose, true);
   if (!spot) return;
   const path = route(keep.x, keep.z, spot.x, spot.z);
   if (!path.length) return;
+  let from = keep;
+  for (const n of path) { if (!segClear(from.x, from.z, n.x, n.z, walkR, 0)) return; from = n; }
   c.setPose('stand'); c.root.position.y = 0; c.body.vy = 0; c.sprinting = true;
   c.bolt = { path, spot, t: 0 };
 }
 function stepBolt(c, dt) {
   const B = c.bolt, p = c.root.position; B.t += dt;
+  while (B.path.length > 1 && segClear(p.x, p.z, B.path[1].x, B.path[1].z, c.body.r, 0)) B.path.shift();
+  while (B.path.length && Math.hypot(B.path[0].x - p.x, B.path[0].z - p.z) < 0.3) B.path.shift();
   const n = B.path[0];
-  if (n && B.t < 12) {
+  if (n && B.t < 12 && (B.stuck || 0) < 1.5) {
+    const before = p.clone();
     const dx = n.x - p.x, dz = n.z - p.z, d = Math.hypot(dx, dz), sp = 5.4;
     if (d < 0.3) B.path.shift();
     else { const k = Math.min(d, sp * dt); p.x += dx / d * k; p.z += dz / d * k; c.setYaw(c.yaw + angDiff(c.yaw, Math.atan2(dx, dz)) * Math.min(1, dt * 12)); }
     collideBody(c.body, dt, true);
+    B.stuck = p.distanceTo(before) < 0.01 * dt ? (B.stuck || 0) + dt : 0;
     stepNoise(c, dt, true, p);
     c.target = { x: p.x, y: p.y, z: p.z, yaw: c.yaw }; c.remoteMoving = 1;
     if (G.online) { c.boltSend = (c.boltSend || 0) - dt; if (c.boltSend <= 0) { c.boltSend = 0.1; Net.relay({ k: 'aic', id: c.id, p: [+p.x.toFixed(2), +p.y.toFixed(2), +p.z.toFixed(2)], y: +c.yaw.toFixed(2), po: c.pose, mv: 1 }); } }
     return;
   }
   const s = B.spot; c.bolt = null; c.remoteMoving = 0; c.sprinting = false;
-  p.set(s.x, s.y || 0, s.z); c.setYaw(s.yaw); c.setPose(s.pose, true); c.body.vy = 0;
-  if (POSES[s.pose]?.wall) snapToWall(c, 0.6);
+  const arrived = Math.hypot(s.x - p.x, s.z - p.z) <= 0.35 && Math.abs(p.y - (s.y || 0)) <= STEP && segClear(p.x, p.z, s.x, s.z, c.body.r, 0);
+  if (arrived) { p.set(s.x, s.y || 0, s.z); c.setYaw(s.yaw); c.setPose(s.pose, true); }
+  else c.setPose('crouch', true);
+  c.body.vy = 0;
   c.target = { x: p.x, y: p.y, z: p.z, yaw: c.yaw };
   try { autoCamo(c, G.D.hiderSkill || 'medium'); c.flush(); } catch (e) { /* keep old paint */ }
   if (G.online) { Net.relay({ k: 'aic', id: c.id, p: [p.x, p.y, p.z], y: c.yaw, po: c.pose, mv: 0 }); Net.relay({ k: 'tex', id: c.id, url: c.texURL() }); }
