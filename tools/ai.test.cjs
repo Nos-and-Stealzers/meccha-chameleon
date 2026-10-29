@@ -163,3 +163,32 @@ test('chasing a hider on an unstandable top walks to a free spot within tag reac
   assert.ok(Math.hypot(p.x - 5, p.z) <= 1.15, 'approach point must stay within tag reach');
   assert.ok(p.x < 5, 'approach from the hunter side');
 });
+test('chasing a hider beside a bench tags from the closest reachable spot instead of looping', () => {
+  const tagged = [];
+  const { h, G } = harness({ freeAt: (x, z) => Math.hypot(x - 5, z) >= 1.3 });
+  G.hostTag = (id) => tagged.push(id);
+  const t = target(5, 0); t.root.position.y = 0.45;
+  h.pos.set(3.4, 0, 0); h.state = 'chase'; h.focus = t; h.sus.set(t, 1.2);
+  h.lastSeen = new V3(5, 0.45, 0); h.seenT = 9.95; h.lastVis.add(t); h.observed.set(t, { pos: new V3(5, 0.45, 0), time: 9.95 });
+  h.path = []; h.repathT = 1; h.swing = 0;
+  h.update(.05, [t]);
+  assert.deepEqual(tagged, ['hider']);
+});
+test('chase tag reach stays short while the hunter still has route left', () => {
+  const tagged = [];
+  const { h, G } = harness();
+  G.hostTag = (id) => tagged.push(id);
+  const t = target(5, 0);
+  h.pos.set(3.4, 0, 0); h.state = 'chase'; h.focus = t; h.sus.set(t, 1.2);
+  h.lastSeen = new V3(5, 0, 0); h.seenT = 9.95; h.lastVis.add(t); h.observed.set(t, { pos: new V3(5, 0, 0), time: 9.95 });
+  h.repathT = 1; h.path = [{ x: 4.6, z: 0 }]; h.follow = () => {};
+  h.update(.05, [t]);
+  assert.deepEqual(tagged, []);
+});
+test('goTo verifies a route with the clearance it was planned with, not the wider body radius', () => {
+  let asked;
+  const { h } = harness({ segClear: (ax, az, bx, bz, r) => r <= 0.26, route: (x, z, tx, tz, r) => { asked = r; return [{ x: tx, z: tz }]; } });
+  h.body = { r: 0.3 };
+  h.goTo(5, 0);
+  assert.equal(asked, 0.26); assert.equal(h.path.length, 1);
+});
