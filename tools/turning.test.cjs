@@ -72,12 +72,14 @@ test('a wall cutting in pulls the camera in on the same frame, open space eases 
   assert.ok(d > 0.78 && d < 2.3, `should ease back out, got ${d}`);
 });
 
-test('mouse look drops a lone pointer-lock spike but keeps real fast flicks', () => {
+test('mouse look preserves abrupt high-DPI flicks and rejects only invalid driver data', () => {
   const c = ctx();
   vm.runInContext(between('const lookFilter =', 'document.addEventListener(\'pointerlockchange\', () => { lookFilter'), c);
   let t = 0; const d = (x) => { t += 4; const r = c.lookDelta(x, 0, t); return r && Array.from(r); };
   assert.deepEqual(d(6), [6, 0]); assert.deepEqual(d(9), [9, 0]);
-  assert.equal(d(912), null, 'teleport spike after slow motion is dropped');
+  for (const x of [912, 2400, 1800, 3200]) assert.deepEqual(d(x), [x, 0], 'abrupt high-DPI flick was swallowed');
+  assert.equal(d(100000), null, 'impossible driver delta is dropped');
+  assert.equal(d(NaN), null, 'NaN driver delta is dropped');
   for (const x of [60, 140, 240, 320, 380]) assert.deepEqual(d(x), [x, 0], `flick delta ${x} swallowed`);
   c.G.ctrl.yaw = 0; c.applyLook(100, 0);
   assert.ok(Math.abs(c.G.ctrl.yaw + 0.22) < 1e-9, 'sensitivity 1 = 0.0022 rad per count');

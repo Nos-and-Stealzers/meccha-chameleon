@@ -1659,14 +1659,13 @@ document.addEventListener('pointerlockchange', () => {
   if (!locked && active() && !G.paint && !UI.chatOpen && !UI.wheelOpen && !UI.panelOpen) { G.paused = !G.online && G.phase !== 'hub'; UI.pause(true); }
   if (locked) { G.paused = false; UI.pause(false); }
 });
-/** Chromium on Windows sometimes reports one huge movementX/Y right after pointer lock or on a non-raw device
-    (the cursor "teleports" back to centre). A lone jump far bigger than the recent motion is dropped, so the view
-    never snaps half a turn; sustained fast flicks still pass because the previous delta is large too. */
+/** Preserve valid raw counts, including abrupt high-DPI flicks. A magnitude-relative "warp" filter mistakes
+    fast mouse motion for a reset and can swallow an entire turn. Reject only non-finite or impossible driver data. */
 const lookFilter = { last: 0, t: 0 };
 function lookDelta(mx, my, now = performance.now()) {
-  const m = Math.max(Math.abs(mx), Math.abs(my)), recent = now - lookFilter.t < 80 ? lookFilter.last : 0;
+  const m = Math.max(Math.abs(mx), Math.abs(my));
   lookFilter.t = now;
-  if (m > 260 && m > recent * 6 + 120) { lookFilter.last = 0; return null; }
+  if (!Number.isFinite(m) || m > 32768) { lookFilter.last = 0; return null; }
   lookFilter.last = m; return [mx, my];
 }
 function applyLook(mx, my) {
