@@ -4,7 +4,7 @@ const THREE = require('../three.min.js'), V3 = THREE.Vector3;
 const source = fs.readFileSync(path.join(__dirname, '../game.js'), 'utf8');
 function harness(overrides = {}) {
   const G = { t: 10, D: { huntSpeed: 2.7, hiderSkill: 'pro' }, phase: 'hunt', hunters: [], hiders: [], hostTag() { this.tags = (this.tags || 0) + 1; } };
-  const c = { THREE, V3, Math, Map, Set, G, STEP: .3, colliders: [],
+  const c = { THREE, V3, Math, Map, Set, G, BrushPreview: { group: { visible: false } }, STEP: .3, colliders: [],
     rand: (a,b) => (a+b)/2, clamp: (x,a,b) => Math.min(b,Math.max(a,x)), lerp: (a,b,t) => a+(b-a)*t, angDiff: (a,b) => b-a,
     envHit: () => null, segClear: () => true, freeAt: () => true, route: (x,z,tx,tz) => [{x:tx,z:tz}],
     collideBody() {}, overlapsXZ: () => false, Sound: { alert() {} }, searchAround: () => [],

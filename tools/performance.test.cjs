@@ -1,8 +1,9 @@
 const test=require('node:test'), assert=require('node:assert/strict'),fs=require('fs'),vm=require('vm'),path=require('path');
 const root=path.resolve(__dirname,'..');
+function fnSrc(t,name){const st=t.indexOf('function '+name+'(');assert.ok(st>=0,name);const o=t.indexOf('{',st);let dp=1,e=o+1;for(;dp;e++){if(t[e]==='{')dp++;else if(t[e]==='}')dp--;}return t.slice(st,e)+'\n';}
 test('a 10 FPS renderer must advance the game clock by one second per wall second',()=>{
  const s=fs.readFileSync(path.join(root,'game.js'),'utf8');const match=s.match(/function frame\(now\) \{[^\n]+\}/);assert.ok(match);
- const c={last:0,elapsed:0,Math,G:{phase:'hunt'},adaptQuality(){},step(dt){c.elapsed+=dt;},requestAnimationFrame(){}};vm.createContext(c);vm.runInContext(match[0],c);
+ const c={last:0,elapsed:0,Math,G:{phase:'hunt'},SETTINGS:{quality:'auto'},QUALITY:{autoLevel:'high'},adaptQuality(){},step(dt){c.elapsed+=dt;},requestAnimationFrame(){}};vm.createContext(c);vm.runInContext(fnSrc(s,'frameDue')+fnSrc(s,'fpsCap')+match[0],c);
  for(let now=100;now<=1000;now+=100)c.frame(now);
  assert.ok(Math.abs(c.elapsed-1)<1e-8,`simulation ran ${c.elapsed}s in 1s (slow-motion bug)`);
 });
@@ -28,8 +29,13 @@ test('paired hunter views split row-by-row with no colour or pixel displacement'
  const data=Uint8Array.from([1,2,3,4,5,6,7,8, 9,10,11,12,13,14,15,16]);const a=new Uint8Array(8),b=new Uint8Array(8);
  splitVision(data,1,2,a,b);assert.deepEqual([...a],[1,2,3,4,9,10,11,12]);assert.deepEqual([...b],[5,6,7,8,13,14,15,16]);
 });
-test('a high-refresh display does not render more than 65 game frames per second',()=>{
- const s=fs.readFileSync(path.join(root,'game.js'),'utf8'),fn=s.match(/function frame\(now\) \{[^\n]+\}/)[0];
- const c={last:0,renders:0,Math,G:{phase:'hunt'},adaptQuality(){},step(){c.renders++},requestAnimationFrame(){}};vm.createContext(c);vm.runInContext(fn,c);
- for(let i=1;i<=180;i++)c.frame(i*1000/180);assert.ok(c.renders<=65,`rendered ${c.renders} frames at 180 Hz`);assert.ok(c.renders>=55);
+function frameCtx(settings,auto){const s=fs.readFileSync(path.join(root,'game.js'),'utf8'),fn=s.match(/function frame\(now\) \{[^\n]+\}/)[0];
+ const c={last:0,renders:0,Math,G:{phase:'hunt'},SETTINGS:settings,QUALITY:{autoLevel:auto},adaptQuality(){},step(){c.renders++},requestAnimationFrame(){}};vm.createContext(c);vm.runInContext(fnSrc(s,'frameDue')+fnSrc(s,'fpsCap')+fn,c);return c;}
+test('weak GPUs (auto) and a 60 cap do not render more than 65 game frames per second on a high-refresh display',()=>{
+ for(const c of [frameCtx({quality:'auto'},'low'),frameCtx({quality:'high',fpsCap:60},'high')]){
+  for(let i=1;i<=180;i++)c.frame(i*1000/180);assert.ok(c.renders<=65,`rendered ${c.renders} frames at 180 Hz`);assert.ok(c.renders>=55);}
+});
+test('capable GPUs render every display frame on 240 Hz even with vsync jitter (no 16.7/20.8 ms judder)',()=>{
+ const c=frameCtx({quality:'auto'},'high');let now=0;for(let i=1;i<=240;i++){now+=1000/240+(i%2?0.3:-0.3);c.frame(now);}assert.equal(c.renders,240);
+ const d=frameCtx({quality:'high',fpsCap:60},'high');now=0;for(let i=1;i<=240;i++){now+=1000/240+(i%2?0.4:-0.4);d.frame(now);}assert.ok(d.renders>=58&&d.renders<=61,`60 cap with jitter rendered ${d.renders}`);
 });

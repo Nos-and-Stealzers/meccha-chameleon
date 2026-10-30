@@ -28,9 +28,9 @@ function harness() {
   class Raycaster {
     constructor() { this.ray = { direction: new THREE.Vector3(0, 0, -1) }; }
     setFromCamera(v) { this.ndc = v.clone(); rays.push(v.clone()); }
-    intersectObject() { return [{ uv: new THREE.Vector2((this.ndc.x + 1) / 2, .5), point: new THREE.Vector3(), face: {normal: new THREE.Vector3(0, 0, 1)} }]; }
+    intersectObject() { return [{ distance: 1, uv: new THREE.Vector2((this.ndc.x + 1) / 2, .5), point: new THREE.Vector3(), face: {normal: new THREE.Vector3(0, 0, 1)} }]; }
   }
-  const c = { THREE: { ...THREE, Raycaster }, G: { my: P, ink: 100, phase: 'prep' }, UI: { brush: 2, color: '#ff0000', curTool: 'brush', refreshInk() {} }, mouse: { lastUV: null }, camera: {}, renderer: { domElement: { getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }) } }, innerWidth: 800, innerHeight: 600, TS: 512, PSCALE: 1, Math, Sound: { splat() {}, click() {} }, toast() {}, envHit: () => ({ object: {} }), surfaceColor: () => [100, 120, 140] };
+  const c = { THREE: { ...THREE, Raycaster }, G: { my: P, ink: 100, phase: 'prep' }, UI: { brush: 2, color: '#ff0000', curTool: 'brush', refreshInk() {} }, mouse: { lastUV: null }, camera: {}, renderer: { domElement: { getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }) } }, innerWidth: 800, innerHeight: 600, TS: 512, PSCALE: 1, Math, Sound: { splat() {}, click() {} }, toast() {}, envHit: () => ({ object: {}, distance: Infinity }), surfaceColor: () => [100, 120, 140] };
   vm.createContext(c); vm.runInContext(paint, c);
   return { c, dots, rays };
 }
